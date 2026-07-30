@@ -428,7 +428,8 @@ function closeModal(event){if(event&&event.target!==document.getElementById('mod
 // Report
 // ============================================================
 function initReport() {
-  const iso = getISOWeek(new Date());
+  const today = new Date();
+  const iso = getISOWeek(today);
   const savedYear = localStorage.getItem('reportYear');
   const savedWeek = localStorage.getItem('reportWeek');
   currentReportYear = savedYear ? parseInt(savedYear) : iso.year;
@@ -464,13 +465,16 @@ function refreshWeekNav() {
     <button onclick="navigateWeek(1)">下周 ›</button>`;
 }
 function navigateWeek(delta) {
-  const ref = new Date(currentReportYear, 0, 4);
-  ref.setDate(ref.getDate() - ref.getDay() + 1 + (currentReportWeek - 1 + delta) * 7);
-  const iso = getISOWeek(ref);
+  const jan4 = new Date(currentReportYear, 0, 4);
+  const pyWeekday = (jan4.getDay() + 6) % 7;
+  const week1Monday = new Date(jan4);
+  week1Monday.setDate(jan4.getDate() - pyWeekday);
+  const targetMonday = new Date(week1Monday);
+  targetMonday.setDate(week1Monday.getDate() + (currentReportWeek - 1 + delta) * 7);
+  const iso = getISOWeek(targetMonday);
   currentReportYear = iso.year; currentReportWeek = iso.week;
   localStorage.setItem('reportYear', currentReportYear);
   localStorage.setItem('reportWeek', currentReportWeek);
-  // Recalculate company weeks for the new week
   if (settings.companies && settings.companies.length) {
     loadSettings();
   }
@@ -498,7 +502,7 @@ async function generateReport() {
   }
 }
 
-function getISOWeek(d){const date=new Date(d.getTime());date.setHours(0,0,0,0);date.setDate(date.getDate()+3-(date.getDay()+6)%7);const w1=new Date(date.getFullYear(),0,4);return{year:date.getFullYear(),week:1+Math.round(((date-w1)/86400000-3+(w1.getDay()+6)%7)/7)};}
+function getISOWeek(d){const date=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const dayNum=date.getUTCDay()||7;date.setUTCDate(date.getUTCDate()+4-dayNum);const yearStart=new Date(Date.UTC(date.getUTCFullYear(),0,1));return{year:date.getUTCFullYear(),week:Math.ceil(((date-yearStart)/86400000+1)/7)};}
 
 function renderReport(data){
   // 用周报的实际数据更新标题（优先使用周报的精确计算）
