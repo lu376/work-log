@@ -119,8 +119,12 @@ async function logout(){
 
 async function loadToday() {
   editingDate = null;
-  const data = await api('/api/today');
-  currentData = normalize(data);
+  const data = await api(`/api/record/${TODAY}`);
+  if (data && !data.error) {
+    currentData = normalize(data);
+  } else {
+    currentData = { tasks: [], learnings: [], outputs: [], experiences: [] };
+  }
   renderAll('today');
 }
 function normalize(data) { return { tasks: data.tasks||[], learnings: data.learnings||[], outputs: data.outputs||[], experiences: data.experiences||[] }; }
@@ -373,8 +377,8 @@ function updateAllCounts(ctx){const pfx=ctx==='today'?'':'hist-';const set=(id,v
 // ============================================================
 // Save
 // ============================================================
-function debounceAutoSave(){clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(autoSave,500);}
-async function autoSave(){if(editingDate)return;try{await api('/api/save','POST',{date:TODAY,...currentData});document.getElementById('lastSaved').textContent=`自动保存于 ${new Date().toLocaleTimeString()}`;}catch(e){}}
+function debounceAutoSave(){clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(autoSave,300);}
+async function autoSave(){if(editingDate)return;try{const r=await api('/api/save','POST',{date:TODAY,tasks:currentData.tasks,learnings:currentData.learnings,outputs:currentData.outputs,experiences:currentData.experiences});if(r&&r.ok)document.getElementById('lastSaved').textContent='已保存 '+new Date().toLocaleTimeString();}catch(e){}}
 async function saveAll(dateOverride){const btn=dateOverride?document.getElementById('histSaveBtn'):document.getElementById('saveBtn');if(btn)btn.textContent='⏳ 保存中...';const sd=dateOverride||TODAY;try{await api('/api/save','POST',{date:sd,...currentData});if(btn){btn.textContent='✅ 已保存';setTimeout(()=>{btn.textContent='💾 保存记录';},2000);}if(!dateOverride)document.getElementById('lastSaved').textContent=`保存于 ${new Date().toLocaleTimeString()}`;showToast('保存成功');}catch(e){if(btn)btn.textContent='❌ 失败';}}
 
 // ============================================================
