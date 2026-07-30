@@ -6,112 +6,77 @@
 <meta name="theme-color" content="#4F46E5">
 <title>工作记录 - 登录</title>
 <style>
-:root {
-  --primary: #4F46E5; --bg: #F5F5F7; --card: #FFFFFF;
-  --text: #1F2937; --text-secondary: #6B7280; --border: #E5E7EB;
-  --radius: 16px; --shadow: 0 4px 20px rgba(0,0,0,0.06);
-}
+:root { --primary: #4F46E5; --bg: #F5F5F7; --card: #FFFFFF; --text: #1F2937; --text-secondary: #6B7280; --border: #E5E7EB; --radius: 16px; --shadow: 0 4px 20px rgba(0,0,0,0.06); }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: var(--bg); color: var(--text);
-  display: flex; align-items: center; justify-content: center;
-  min-height: 100vh; min-height: 100dvh;
-  padding: 20px; -webkit-font-smoothing: antialiased;
-}
-.card {
-  background: var(--card); border-radius: var(--radius);
-  padding: 32px 24px; width: 100%; max-width: 360px;
-  box-shadow: var(--shadow); text-align: center;
-}
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); display: flex; align-items: center; justify-content: center; min-height: 100vh; min-height: 100dvh; padding: 20px; -webkit-font-smoothing: antialiased; }
+.card { background: var(--card); border-radius: var(--radius); padding: 32px 24px; width: 100%; max-width: 360px; box-shadow: var(--shadow); text-align: center; }
 .icon { font-size: 48px; margin-bottom: 12px; }
 .title { font-size: 20px; font-weight: 700; margin-bottom: 4px; color: var(--primary); }
-.subtitle { font-size: 13px; color: var(--text-secondary); margin-bottom: 24px; }
-.input {
-  width: 100%; padding: 12px 16px; border: 1.5px solid var(--border);
-  border-radius: 12px; font-size: 16px; font-family: inherit;
-  outline: none; text-align: center; -webkit-text-security: disc;
-  transition: border-color 0.2s;
-}
+.subtitle { font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; }
+.input { width: 100%; padding: 12px 16px; border: 1.5px solid var(--border); border-radius: 12px; font-size: 16px; font-family: inherit; outline: none; transition: border-color 0.2s; margin-bottom: 10px; }
 .input:focus { border-color: var(--primary); }
-.btn {
-  width: 100%; padding: 12px; background: var(--primary);
-  color: white; border: none; border-radius: 12px;
-  font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 16px;
-  transition: all 0.2s;
-}
+.btn { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
 .btn:active { transform: scale(0.97); opacity: 0.9; }
+.btn-outline { width: 100%; padding: 10px; background: none; color: var(--primary); border: 1.5px solid var(--primary); border-radius: 12px; font-size: 14px; font-weight: 500; cursor: pointer; margin-top: 10px; }
 .error { color: #EF4444; font-size: 13px; margin-top: 10px; min-height: 20px; }
-.hint { font-size: 12px; color: var(--text-secondary); margin-top: 16px; line-height: 1.5; }
 </style>
 </head>
 <body>
-<div class="card" id="card">
+<div class="card">
   <div class="icon">🔐</div>
   <div class="title" id="title">工作记录</div>
-  <div class="subtitle" id="subtitle">请输入密码</div>
-  <form onsubmit="handleSubmit(event)">
-    <input type="password" class="input" id="password" placeholder="输入密码" autofocus>
+  <div class="subtitle" id="subtitle">登录你的账号</div>
+  <form onsubmit="handleLogin(event)" id="loginForm">
+    <input class="input" id="username" placeholder="用户名" autofocus>
+    <input type="password" class="input" id="password" placeholder="密码">
     <button type="submit" class="btn" id="btn">登录</button>
   </form>
   <div class="error" id="error"></div>
-  <div class="hint" id="hint"></div>
+  <button class="btn-outline" onclick="toggleMode()" id="toggleBtn">没有账号？注册</button>
 </div>
 <script>
-async function checkStatus() {
+let isRegister = false;
+
+async function checkAuth() {
   try {
     const res = await fetch('/api/auth/status');
     const data = await res.json();
-    if (data.authenticated) {
-      window.location.href = '/';
-      return;
-    }
-    if (!data.password_set) {
-      document.getElementById('subtitle').textContent = '首次使用，请设置登录密码';
-      document.getElementById('hint').textContent = '密码保存在本地数据库，不会上传到任何服务器';
-    }
-  } catch(e) {
-    document.getElementById('error').textContent = '连接失败';
-  }
+    if (data.authenticated) window.location.href = '/';
+  } catch(e) {}
 }
 
-async function handleSubmit(e) {
+function toggleMode() {
+  isRegister = !isRegister;
+  document.getElementById('title').textContent = isRegister ? '注册账号' : '工作记录';
+  document.getElementById('subtitle').textContent = isRegister ? '创建你的个人账号' : '登录你的账号';
+  document.getElementById('btn').textContent = isRegister ? '注册' : '登录';
+  document.getElementById('toggleBtn').textContent = isRegister ? '已有账号？登录' : '没有账号？注册';
+  document.getElementById('error').textContent = '';
+}
+
+async function handleLogin(e) {
   e.preventDefault();
+  const username = document.getElementById('username').value.trim();
   const pw = document.getElementById('password').value.trim();
-  if (!pw) return;
-  if (pw.length < 4) {
-    document.getElementById('error').textContent = '密码至少 4 位';
-    return;
-  }
+  if (!username) { document.getElementById('error').textContent = '请输入用户名'; return; }
+  if (pw.length < 4) { document.getElementById('error').textContent = '密码至少 4 位'; return; }
 
   const btn = document.getElementById('btn');
-  btn.textContent = '⏳ 请稍候...';
-  btn.disabled = true;
+  btn.textContent = '⏳ ...'; btn.disabled = true;
   document.getElementById('error').textContent = '';
 
   try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pw })
-    });
+    const url = isRegister ? '/api/auth/register' : '/api/auth/login';
+    const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({username, password: pw}) });
     const data = await res.json();
-
-    if (data.ok) {
-      window.location.href = '/';
-    } else {
-      document.getElementById('error').textContent = data.error || '登录失败';
-      document.getElementById('password').value = '';
-      document.getElementById('password').focus();
-    }
-  } catch(e) {
-    document.getElementById('error').textContent = '网络错误，请重试';
-  }
-  btn.textContent = '登录';
+    if (data.ok) { window.location.href = '/'; }
+    else { document.getElementById('error').textContent = data.error || '操作失败'; }
+  } catch(e) { document.getElementById('error').textContent = '网络错误'; }
+  btn.textContent = isRegister ? '注册' : '登录';
   btn.disabled = false;
 }
 
-checkStatus();
+checkAuth();
 </script>
 </body>
 </html>

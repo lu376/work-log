@@ -41,62 +41,58 @@ STATIC_DIR.mkdir(exist_ok=True)
 # 认证 & 会话
 # ============================================================
 
-SESSION_STORE = {}  # token -> {"expires": datetime}
+SESSION_STORE = {}  # token -> {"username": str, "expires": datetime}
 
 def _hash_password(password: str) -> str:
-    """SHA-256 哈希密码。"""
-    salt = "worklog2026"
-    return hashlib.sha256((salt + password).encode()).hexdigest()
+    """SHA-256 哈希。"""
+    return hashlib.sha256(("wl2026!!" + password).encode()).hexdigest()
 
-def _get_password() -> str:
-    """从数据库获取密码哈希。"""
+def _user_exists(username: str) -> bool:
     conn = get_db()
-    row = conn.execute("SELECT value FROM settings WHERE key='password'").fetchone()
+    row = conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone()
     conn.close()
-    if not row:
-        return ""
-    try:
-        return json.loads(row["value"]).get("hash", "")
-    except Exception:
-        return ""
+    return bool(row)
 
-def _set_password(password: str):
-    """设置密码。"""
+def _create_user(username: str, password: str):
     conn = get_db()
-    data = json.dumps({"hash": _hash_password(password)}, ensure_ascii=False)
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('password', ?)", (data,))
+    h = _hash_password(password)
+    conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, h))
     conn.commit()
     conn.close()
 
-def _is_password_set() -> bool:
-    return bool(_get_password())
+def _check_user(username: str, password: str) -> bool:
+    conn = get_db()
+    row = conn.execute("SELECT password_hash FROM users WHERE username=?", (username,)).fetchone()
+    conn.close()
+    return row and row["password_hash"] == _hash_password(password)
 
-def _check_password(password: str) -> bool:
-    return _hash_password(password) == _get_password()
-
-def _create_session() -> str:
-    """创建会话，返回 token。"""
+def _create_session(username: str) -> str:
     token = secrets.token_hex(32)
-    SESSION_STORE[token] = {"expires": datetime.now() + timedelta(hours=72)}
+    SESSION_STORE[token] = {"username": username, "expires": datetime.now() + timedelta(hours=72)}
     return token
 
-def _validate_session(token: str) -> bool:
-    """验证会话 token。"""
+def _validate_session(token: str) -> str | None:
+    """验证会话，返回 username 或 None。"""
     if not token or token not in SESSION_STORE:
-        return False
-    if datetime.now() > SESSION_STORE[token]["expires"]:
+        return None
+    s = SESSION_STORE[token]
+    if datetime.now() > s["expires"]:
         del SESSION_STORE[token]
-        return False
-    return True
+        return None
+    return s["username"]
 
 def _get_auth_token(headers) -> str:
-    """从 Cookie 提取 auth token。"""
     cookie_header = headers.get("Cookie", "")
     if not cookie_header:
         return None
     cookie = SimpleCookie()
     cookie.load(cookie_header)
     return cookie.get("auth_token", None).value if cookie.get("auth_token") else None
+
+def _get_current_user(headers) -> str | None:
+    """从请求头获取当前登录的用户名。"""
+    token = _get_auth_token(headers)
+    return _validate_session(token)
 
 # ============================================================
 # 数据库
@@ -108,23 +104,37 @@ def get_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("""CREATE TABLE IF NOT EXISTS users (
+        username      TEXT PRIMARY KEY,
+        password_hash TEXT NOT NULL,
+        created_at    TEXT DEFAULT ''
+    )""")
     conn.execute("""CREATE TABLE IF NOT EXISTS records (
-        date       TEXT PRIMARY KEY,
-        tasks      TEXT DEFAULT '[]',
-        learnings  TEXT DEFAULT '[]',
-        outputs    TEXT DEFAULT '[]',
+        username    TEXT DEFAULT '',
+        date        TEXT,
+        tasks       TEXT DEFAULT '[]',
+        learnings   TEXT DEFAULT '[]',
+        outputs     TEXT DEFAULT '[]',
         experiences TEXT DEFAULT '[]',
-        updated_at TEXT
+        updated_at  TEXT,
+        PRIMARY KEY (username, date)
     )""")
     conn.execute("""CREATE TABLE IF NOT EXISTS refs (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        username   TEXT DEFAULT '',
         content    TEXT NOT NULL,
         sort_order INTEGER DEFAULT 0
     )""")
     conn.execute("""CREATE TABLE IF NOT EXISTS settings (
-        key   TEXT PRIMARY KEY,
-        value TEXT DEFAULT '{}'
+        username TEXT DEFAULT '',
+        key      TEXT,
+        value    TEXT DEFAULT '{}',
+        PRIMARY KEY (username, key)
     )""")
+    # 兼容旧数据：给无 username 的行补上默认值
+    conn.execute("UPDATE records SET username='default' WHERE username='' OR username IS NULL")
+    conn.execute("UPDATE refs SET username='default' WHERE username='' OR username IS NULL")
+    conn.execute("UPDATE settings SET username='default' WHERE username='' OR username IS NULL")
     conn.commit()
     return conn
 
@@ -251,9 +261,9 @@ def _parse_md_file(path: Path) -> dict:
 # 数据访问
 # ============================================================
 
-def db_get_record(date_str: str) -> dict:
+def db_get_record(username: str, date_str: str) -> dict:
     conn = get_db()
-    row = conn.execute("SELECT * FROM records WHERE date=?", (date_str,)).fetchone()
+    row = conn.execute("SELECT * FROM records WHERE username=? AND date=?", (username, date_str)).fetchone()
     conn.close()
     if not row:
         return None
@@ -264,11 +274,11 @@ def db_get_record(date_str: str) -> dict:
         "experiences": json.loads(row["experiences"]),
     }
 
-def db_save_record(date_str: str, data: dict):
+def db_save_record(username: str, date_str: str, data: dict):
     conn = get_db()
-    conn.execute("""INSERT OR REPLACE INTO records (date, tasks, learnings, outputs, experiences, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)""",
-                 (date_str,
+    conn.execute("""INSERT OR REPLACE INTO records (username, date, tasks, learnings, outputs, experiences, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                 (username, date_str,
                   json.dumps(data.get("tasks", []), ensure_ascii=False),
                   json.dumps(data.get("learnings", []), ensure_ascii=False),
                   json.dumps(data.get("outputs", []), ensure_ascii=False),
@@ -277,35 +287,35 @@ def db_save_record(date_str: str, data: dict):
     conn.commit()
     conn.close()
 
-def db_delete_record(date_str: str):
+def db_delete_record(username: str, date_str: str):
     conn = get_db()
-    conn.execute("DELETE FROM records WHERE date=?", (date_str,))
+    conn.execute("DELETE FROM records WHERE username=? AND date=?", (username, date_str))
     conn.commit()
     conn.close()
 
-def db_get_dates() -> list:
+def db_get_dates(username: str) -> list:
     conn = get_db()
-    rows = conn.execute("SELECT date FROM records ORDER BY date DESC").fetchall()
+    rows = conn.execute("SELECT date FROM records WHERE username=? ORDER BY date DESC", (username,)).fetchall()
     conn.close()
     return [r["date"] for r in rows]
 
-def db_get_refs() -> list:
+def db_get_refs(username: str) -> list:
     conn = get_db()
-    rows = conn.execute("SELECT content FROM refs ORDER BY sort_order").fetchall()
+    rows = conn.execute("SELECT content FROM refs WHERE username=? ORDER BY sort_order", (username,)).fetchall()
     conn.close()
     return [r["content"] for r in rows]
 
-def db_save_refs(refs: list):
+def db_save_refs(username: str, refs: list):
     conn = get_db()
-    conn.execute("DELETE FROM refs")
+    conn.execute("DELETE FROM refs WHERE username=?", (username,))
     for i, content in enumerate(refs):
-        conn.execute("INSERT INTO refs (content, sort_order) VALUES (?, ?)", (content, i))
+        conn.execute("INSERT INTO refs (username, content, sort_order) VALUES (?, ?, ?)", (username, content, i))
     conn.commit()
     conn.close()
 
-def db_get_settings() -> dict:
+def db_get_settings(username: str) -> dict:
     conn = get_db()
-    row = conn.execute("SELECT value FROM settings WHERE key='companies'").fetchone()
+    row = conn.execute("SELECT value FROM settings WHERE username=? AND key='companies'", (username,)).fetchone()
     conn.close()
     if not row:
         return {"companies": []}
@@ -314,23 +324,22 @@ def db_get_settings() -> dict:
     except Exception:
         return {"companies": []}
 
-def db_save_settings(data: dict):
+def db_save_settings(username: str, data: dict):
     conn = get_db()
     companies = json.dumps(data.get("companies", []), ensure_ascii=False)
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('companies', ?)", (companies,))
+    conn.execute("INSERT OR REPLACE INTO settings (username, key, value) VALUES (?, 'companies', ?)", (username, companies))
     conn.commit()
     conn.close()
 
-def db_get_week_records(year: int, week: int) -> list:
-    """获取指定周的记录列表。"""
+def db_get_week_records(username: str, year: int, week: int) -> list:
     jan4 = date(year, 1, 4)
     first_monday = jan4 - timedelta(days=jan4.weekday())
     monday = first_monday + timedelta(weeks=week - 1)
     sunday = monday + timedelta(days=6)
 
     conn = get_db()
-    rows = conn.execute("SELECT * FROM records WHERE date BETWEEN ? AND ? ORDER BY date",
-                        (monday.isoformat(), sunday.isoformat())).fetchall()
+    rows = conn.execute("SELECT * FROM records WHERE username=? AND date BETWEEN ? AND ? ORDER BY date",
+                        (username, monday.isoformat(), sunday.isoformat())).fetchall()
     conn.close()
 
     records = []
@@ -366,13 +375,13 @@ def calc_company_weeks(start_date_str: str, target_date: date = None) -> dict:
         return None
     return {"week_num": days // 7 + 1, "start_date": start_date_str.replace("-", "."), "days": days}
 
-def get_week_report_data(year: int, week: int) -> dict:
+def get_week_report_data(username: str, year: int, week: int) -> dict:
     jan4 = date(year, 1, 4)
     first_monday = jan4 - timedelta(days=jan4.weekday())
     monday = first_monday + timedelta(weeks=week - 1)
     sunday = monday + timedelta(days=6)
 
-    records = db_get_week_records(year, week)
+    records = db_get_week_records(username, year, week)
 
     tasks_total = 0; tasks_done = 0
     all_completed = []; all_uncompleted = []; all_learnings = []
@@ -481,13 +490,14 @@ class RequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {args[0]}")
 
-    def _require_auth(self) -> bool:
-        """检查认证，未登录返回 False。"""
+    def _require_auth(self) -> str | None:
+        """检查认证，返回 username 或 None。"""
         token = _get_auth_token(self.headers)
-        if not _validate_session(token):
+        user = _validate_session(token)
+        if not user:
             self._send_json({"error": "请先登录"}, 401)
-            return False
-        return True
+            return None
+        return user
 
     def _set_auth_cookie(self, token: str, max_age: int = 259200):
         """设置认证 cookie（默认 3 天）。"""
@@ -529,9 +539,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         # ---- 公开路由（无需认证） ----
         if path == "/api/auth/status":
             token = _get_auth_token(self.headers)
+            user = _validate_session(token)
             self._send_json({
-                "password_set": _is_password_set(),
-                "authenticated": _validate_session(token),
+                "authenticated": bool(user),
+                "username": user or "",
             })
             return
 
@@ -555,27 +566,28 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_file(STATIC_DIR / "login.html", "text/html; charset=utf-8")
             return
 
-        # ---- 以下需要认证 ----
-        if not self._require_auth():
+        # ---- 已认证路由 ----
+        user = self._require_auth()
+        if not user:
             return
 
         if path == "/api/today":
-            data = db_get_record(date.today().isoformat()) or {"tasks":[],"learnings":[],"outputs":[],"experiences":[]}
+            data = db_get_record(user, date.today().isoformat()) or {"tasks":[],"learnings":[],"outputs":[],"experiences":[]}
             self._send_json(data)
 
         elif path == "/api/dates":
-            self._send_json({"dates": db_get_dates()})
+            self._send_json({"dates": db_get_dates(user)})
 
         elif path.startswith("/api/record/"):
             date_str = path.split("/")[-1]
-            data = db_get_record(date_str)
+            data = db_get_record(user, date_str)
             if data:
                 self._send_json({"date": date_str, **data})
             else:
                 self._send_json({"error": "记录不存在"}, 404)
 
         elif path == "/api/references":
-            self._send_json({"references": db_get_refs()})
+            self._send_json({"references": db_get_refs(user)})
 
         elif path == "/api/report":
             year_str = params.get("year", [None])[0]
@@ -584,7 +596,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             cy, cw = get_current_week()
             year = int(year_str) if year_str else cy
             week = int(week_str) if week_str else cw
-            data = get_week_report_data(year, week)
+            data = get_week_report_data(user, year, week)
             if fmt == "text":
                 self._send_text(render_dingtalk_report(data))
             else:
@@ -592,7 +604,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json(data)
 
         elif path == "/api/settings":
-            self._send_json(db_get_settings())
+            self._send_json(db_get_settings(user))
 
         else:
             self._send_json({"error": "Not Found"}, 404)
@@ -602,28 +614,43 @@ class RequestHandler(BaseHTTPRequestHandler):
         path = unquote(parsed.path)
 
         # ---- 公开路由（无需认证） ----
-        if path == "/api/auth/login":
+        if path == "/api/auth/register":
             body = self._read_body()
+            username = body.get("username", "").strip()
             pw = body.get("password", "").strip()
+            if not username or len(username) < 2:
+                self._send_json({"ok": False, "error": "用户名至少 2 位"}, 400); return
             if len(pw) < 4:
-                self._send_json({"ok": False, "error": "密码至少 4 位"}, 400)
-                return
-
-            # 首次自动设置密码，之后验证
-            if not _is_password_set():
-                _set_password(pw)
-
-            if not _check_password(pw):
-                self._send_json({"ok": False, "error": "密码错误"}, 401)
-                return
-
-            token = _create_session()
+                self._send_json({"ok": False, "error": "密码至少 4 位"}, 400); return
+            if _user_exists(username):
+                self._send_json({"ok": False, "error": "用户名已存在"}, 400); return
+            _create_user(username, pw)
+            token = _create_session(username)
             self.send_response(200)
             self._set_auth_cookie(token)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8"))
+            self.wfile.write(json.dumps({"ok": True, "username": username}, ensure_ascii=False).encode("utf-8"))
+            return
+
+        elif path == "/api/auth/login":
+            body = self._read_body()
+            username = body.get("username", "").strip()
+            pw = body.get("password", "").strip()
+            if not username:
+                self._send_json({"ok": False, "error": "请输入用户名"}, 400); return
+            if not _user_exists(username):
+                self._send_json({"ok": False, "error": "用户名或密码错误"}, 401); return
+            if not _check_user(username, pw):
+                self._send_json({"ok": False, "error": "用户名或密码错误"}, 401); return
+            token = _create_session(username)
+            self.send_response(200)
+            self._set_auth_cookie(token)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "username": username}, ensure_ascii=False).encode("utf-8"))
             return
 
         elif path == "/api/auth/logout":
@@ -633,8 +660,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True})
             return
 
-        # ---- 以下需要认证 ----
-        if not self._require_auth():
+        # ---- 需要认证 ----
+        user = self._require_auth()
+        if not user:
             return
 
         if path == "/api/save":
@@ -647,7 +675,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "experiences": body.get("experiences", []),
             }
             try:
-                db_save_record(date_str, data)
+                db_save_record(user, date_str, data)
                 self._send_json({"ok": True, "date": date_str})
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
@@ -655,7 +683,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/references":
             body = self._read_body()
             try:
-                db_save_refs(body.get("references", []))
+                db_save_refs(user, body.get("references", []))
                 self._send_json({"ok": True})
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
@@ -663,7 +691,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/settings":
             body = self._read_body()
             try:
-                db_save_settings(body)
+                db_save_settings(user, body)
                 self._send_json({"ok": True})
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
@@ -672,13 +700,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             body = self._read_body()
             old_pw = body.get("old_password", "")
             new_pw = body.get("new_password", "").strip()
-            if not _check_password(old_pw):
-                self._send_json({"ok": False, "error": "原密码错误"}, 400)
-                return
+            if not _check_user(user, old_pw):
+                self._send_json({"ok": False, "error": "原密码错误"}, 400); return
             if len(new_pw) < 4:
-                self._send_json({"ok": False, "error": "新密码至少 4 位"}, 400)
-                return
-            _set_password(new_pw)
+                self._send_json({"ok": False, "error": "新密码至少 4 位"}, 400); return
+            _create_user(user, new_pw)  # overwrites password_hash
             self._send_json({"ok": True})
             return
 
@@ -688,11 +714,13 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        user = self._require_auth()
+        if not user: return
 
         if path.startswith("/api/record/"):
             date_str = path.split("/")[-1]
             try:
-                db_delete_record(date_str)
+                db_delete_record(user, date_str)
                 self._send_json({"ok": True, "date": date_str})
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
