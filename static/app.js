@@ -209,7 +209,10 @@ function renderAll(container) {
   renderTasksTo(container, wrap.querySelector(container==='today'?'#taskList':'#hist-taskList'), currentData.tasks);
   renderItemsTo(container, 'learnings', wrap.querySelector(container==='today'?'#learningList':'#hist-learningList'), currentData.learnings, 'numbered');
   renderItemsTo(container, 'outputs', wrap.querySelector(container==='today'?'#outputList':'#hist-outputList'), currentData.outputs, 'bullet');
-  renderItemsTo(container, 'experiences', wrap.querySelector(container==='today'?'#experienceList':'#hist-experienceList'), currentData.experiences, 'numbered');
+  // 参考资料用独立的 refsData
+  if (container === 'today') {
+    renderItemsTo(container, 'references', wrap.querySelector('#refList'), refsData, 'bullet');
+  }
   updateAllCounts(container);
 }
 
@@ -658,7 +661,8 @@ async function handleUpload(input){
         currentData[uploadTargetField].push(url);
         const ctx = editingDate ? 'history' : 'today';
         renderAll(ctx);
-        autoSave();
+        if (uploadTargetField === 'references') { refsData.push(url); renderRefs(); autoSaveRefs(); }
+        else { autoSave(); }
         showToast('图片已上传');
       } else {
         showToast('上传失败');
