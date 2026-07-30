@@ -97,9 +97,10 @@ def _create_session(username: str) -> str:
     # 写入数据库，服务重启后能恢复
     conn = get_db()
     cur = conn.cursor()
-    _db_exec(cur, "INSERT OR REPLACE INTO sessions (token, username, expires) VALUES (?,?,?)", (token, username, expires))
     if USE_PG:
         _db_exec(cur, "INSERT INTO sessions (token, username, expires) VALUES (?,?,?) ON CONFLICT (token) DO UPDATE SET username=?, expires=?", (token, username, expires, username, expires))
+    else:
+        conn.execute("INSERT OR REPLACE INTO sessions (token, username, expires) VALUES (?,?,?)", (token, username, expires))
     conn.commit()
     if USE_PG: cur.close()
     conn.close()
@@ -155,7 +156,7 @@ def _get_current_user(headers) -> str | None:
 def get_db():
     """获取数据库连接（自动检测 SQLite 或 PostgreSQL）。"""
     if USE_PG:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
         conn.autocommit = True
         cur = conn.cursor()
         cur.execute("""CREATE TABLE IF NOT EXISTS users (
