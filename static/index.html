@@ -286,6 +286,12 @@ document.addEventListener('DOMContentLoaded', () => {
   updateHeaderDate(); loadToday(); loadSettings(); loadRefs();
   document.getElementById('view-today').addEventListener('input', debounceAutoSave);
   document.getElementById('view-today').addEventListener('change', debounceAutoSave);
+  // 离开页面前强制保存
+  window.addEventListener('beforeunload', () => {
+    if (editingDate) return;
+    const data = { date: TODAY, tasks: currentData.tasks, learnings: currentData.learnings, outputs: currentData.outputs, experiences: currentData.experiences };
+    navigator.sendBeacon('/api/save', JSON.stringify(data));
+  });
   // 恢复上次的 Tab
   const lastView = localStorage.getItem('lastView');
   if (lastView && (lastView === 'history' || lastView === 'report')) {
@@ -587,7 +593,7 @@ function updateAllCounts(ctx){const pfx=ctx==='today'?'':'hist-';const set=(id,v
 // ============================================================
 // Save
 // ============================================================
-function debounceAutoSave(){clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(autoSave,3000);}
+function debounceAutoSave(){clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(autoSave,800);}
 async function autoSave(){if(editingDate)return;try{await api('/api/save','POST',{date:TODAY,...currentData});document.getElementById('lastSaved').textContent=`自动保存于 ${new Date().toLocaleTimeString()}`;}catch(e){}}
 async function saveAll(dateOverride){const btn=dateOverride?document.getElementById('histSaveBtn'):document.getElementById('saveBtn');if(btn)btn.textContent='⏳ 保存中...';const sd=dateOverride||TODAY;try{await api('/api/save','POST',{date:sd,...currentData});if(btn){btn.textContent='✅ 已保存';setTimeout(()=>{btn.textContent='💾 保存记录';},2000);}if(!dateOverride)document.getElementById('lastSaved').textContent=`保存于 ${new Date().toLocaleTimeString()}`;showToast('保存成功');}catch(e){if(btn)btn.textContent='❌ 失败';}}
 
@@ -648,14 +654,11 @@ function initReport() {
   const savedWeek = localStorage.getItem('reportWeek');
   currentReportYear = savedYear ? parseInt(savedYear) : iso.year;
   currentReportWeek = savedWeek ? parseInt(savedWeek) : iso.week;
-  document.getElementById('weekNav').innerHTML = `
-    <button onclick="navigateWeek(-1)">‹ 上周</button>
-    <span class="week-label">第 ${currentReportWeek} 周</span>
-    <button onclick="navigateWeek(1)">下周 ›</button>`;
+  refreshWeekNav();
   document.getElementById('reportContent').innerHTML = '';
   document.getElementById('genBtn').style.display = 'block';
-  // Show hint if no companies configured
   loadSettings().then(() => {
+    refreshWeekNav();
     const hint = document.getElementById('settingsHint');
     if (hint && (!settings.companies || !settings.companies.length)) {
       hint.style.display = 'block';
@@ -664,6 +667,18 @@ function initReport() {
     }
   });
 }
+
+function refreshWeekNav() {
+  let label = `第 ${currentReportWeek} 周`;
+  const weeks = settings.current_weeks || settings.company_weeks || [];
+  if (weeks.length) {
+    label += ' · ' + weeks.map(w => `${w.name}第${w.week_num}周`).join(' · ');
+  }
+  document.getElementById('weekNav').innerHTML = `
+    <button onclick="navigateWeek(-1)">‹ 上周</button>
+    <span class="week-label">${label}</span>
+    <button onclick="navigateWeek(1)">下周 ›</button>`;
+}
 function navigateWeek(delta) {
   const ref = new Date(currentReportYear, 0, 4);
   ref.setDate(ref.getDate() - ref.getDay() + 1 + (currentReportWeek - 1 + delta) * 7);
@@ -671,10 +686,11 @@ function navigateWeek(delta) {
   currentReportYear = iso.year; currentReportWeek = iso.week;
   localStorage.setItem('reportYear', currentReportYear);
   localStorage.setItem('reportWeek', currentReportWeek);
-  document.getElementById('weekNav').innerHTML = `
-    <button onclick="navigateWeek(-1)">‹ 上周</button>
-    <span class="week-label">第 ${currentReportWeek} 周</span>
-    <button onclick="navigateWeek(1)">下周 ›</button>`;
+  // Recalculate company weeks for the new week
+  if (settings.companies && settings.companies.length) {
+    loadSettings();
+  }
+  refreshWeekNav();
   document.getElementById('reportContent').innerHTML = '';
   document.getElementById('genBtn').style.display = 'block';
 }
@@ -698,6 +714,10 @@ async function generateReport() {
 function getISOWeek(d){const date=new Date(d.getTime());date.setHours(0,0,0,0);date.setDate(date.getDate()+3-(date.getDay()+6)%7);const w1=new Date(date.getFullYear(),0,4);return{year:date.getFullYear(),week:1+Math.round(((date-w1)/86400000-3+(w1.getDay()+6)%7)/7)};}
 
 function renderReport(data){
+  // 用周报的实际数据更新标题
+  settings.company_weeks = data.company_weeks || [];
+  refreshWeekNav();
+
   const rate = data.completion_rate;
   let cwHtml = '';
   if ((data.company_weeks||[]).length) {
