@@ -58,8 +58,6 @@ body {
   <div class="hint" id="hint"></div>
 </div>
 <script>
-let mode = 'login'; // 'setup' | 'login'
-
 async function checkStatus() {
   try {
     const res = await fetch('/api/auth/status');
@@ -69,14 +67,11 @@ async function checkStatus() {
       return;
     }
     if (!data.password_set) {
-      mode = 'setup';
-      document.getElementById('title').textContent = '设置密码';
       document.getElementById('subtitle').textContent = '首次使用，请设置登录密码';
-      document.getElementById('btn').textContent = '设置密码并登录';
       document.getElementById('hint').textContent = '密码保存在本地数据库，不会上传到任何服务器';
     }
   } catch(e) {
-    document.getElementById('error').textContent = '连接失败，请检查网络';
+    document.getElementById('error').textContent = '连接失败';
   }
 }
 
@@ -95,8 +90,7 @@ async function handleSubmit(e) {
   document.getElementById('error').textContent = '';
 
   try {
-    const url = mode === 'setup' ? '/api/auth/setup' : '/api/auth/login';
-    const res = await fetch(url, {
+    const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: pw })
@@ -113,7 +107,7 @@ async function handleSubmit(e) {
   } catch(e) {
     document.getElementById('error').textContent = '网络错误，请重试';
   }
-  btn.textContent = mode === 'setup' ? '设置密码并登录' : '登录';
+  btn.textContent = '登录';
   btn.disabled = false;
 }
 

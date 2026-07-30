@@ -7,10 +7,6 @@
   python app.py              # 默认端口 8080
   python app.py --port 9000  # 指定端口
 
-访问方式:
-  - 本机: http://localhost:8080
-  - 手机: http://<电脑IP>:8080  (同一局域网)
-
 数据存储: daily/worklog.db (SQLite)
 首次启动自动从 daily/*.md 迁移已有数据。
 """
@@ -606,38 +602,29 @@ class RequestHandler(BaseHTTPRequestHandler):
         path = unquote(parsed.path)
 
         # ---- 公开路由（无需认证） ----
-        if path == "/api/auth/setup":
-            if _is_password_set():
-                self._send_json({"error": "密码已设置"}, 400)
-                return
+        if path == "/api/auth/login":
             body = self._read_body()
             pw = body.get("password", "").strip()
             if len(pw) < 4:
-                self._send_json({"error": "密码至少 4 位"}, 400)
+                self._send_json({"ok": False, "error": "密码至少 4 位"}, 400)
                 return
-            _set_password(pw)
-            token = _create_session()
-            self._send_json({"ok": True, "need_login": False})
-            return
 
-        elif path == "/api/auth/login":
-            body = self._read_body()
-            pw = body.get("password", "")
+            # 首次自动设置密码，之后验证
             if not _is_password_set():
-                self._send_json({"error": "请先设置密码", "need_setup": True}, 400)
-                return
-            if _check_password(pw):
-                token = _create_session()
-                self.send_response(200)
-                self._set_auth_cookie(token)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8"))
-                return
-            else:
+                _set_password(pw)
+
+            if not _check_password(pw):
                 self._send_json({"ok": False, "error": "密码错误"}, 401)
                 return
+
+            token = _create_session()
+            self.send_response(200)
+            self._set_auth_cookie(token)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8"))
+            return
 
         elif path == "/api/auth/logout":
             token = _get_auth_token(self.headers)
