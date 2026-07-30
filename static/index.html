@@ -173,7 +173,7 @@ body {
 <header class="app-header">
   <div class="header-row">
     <div class="app-title">📋 工作记录</div>
-    <div class="header-date" id="headerDate"></div>
+    <button onclick="logout()" style="background:none;border:none;font-size:13px;color:var(--text-secondary);cursor:pointer;padding:4px 8px;">退出</button>
   </div>
 </header>
 
@@ -309,8 +309,14 @@ async function api(url, method='GET', body=null) {
   const opts = { method, headers: {'Content-Type':'application/json'} };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
+  if (res.status === 401) { window.location.href = '/'; return null; }
   const ct = res.headers.get('content-type')||'';
   return ct.includes('application/json') ? res.json() : res.text();
+}
+
+async function logout(){
+  await api('/api/auth/logout', 'POST');
+  window.location.href = '/';
 }
 
 async function loadToday() {

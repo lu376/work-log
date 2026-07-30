@@ -19,11 +19,14 @@ import sys
 import os
 import json
 import re
+import hashlib
+import secrets
 import sqlite3
 import argparse
 from pathlib import Path
 from datetime import date, datetime, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.cookies import SimpleCookie
 from urllib.parse import urlparse, parse_qs, unquote
 
 # ============================================================
@@ -37,6 +40,67 @@ DB_PATH = DAILY_DIR / "worklog.db"
 
 DAILY_DIR.mkdir(exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
+
+# ============================================================
+# 认证 & 会话
+# ============================================================
+
+SESSION_STORE = {}  # token -> {"expires": datetime}
+
+def _hash_password(password: str) -> str:
+    """SHA-256 哈希密码。"""
+    salt = "worklog2026"
+    return hashlib.sha256((salt + password).encode()).hexdigest()
+
+def _get_password() -> str:
+    """从数据库获取密码哈希。"""
+    conn = get_db()
+    row = conn.execute("SELECT value FROM settings WHERE key='password'").fetchone()
+    conn.close()
+    if not row:
+        return ""
+    try:
+        return json.loads(row["value"]).get("hash", "")
+    except Exception:
+        return ""
+
+def _set_password(password: str):
+    """设置密码。"""
+    conn = get_db()
+    data = json.dumps({"hash": _hash_password(password)}, ensure_ascii=False)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('password', ?)", (data,))
+    conn.commit()
+    conn.close()
+
+def _is_password_set() -> bool:
+    return bool(_get_password())
+
+def _check_password(password: str) -> bool:
+    return _hash_password(password) == _get_password()
+
+def _create_session() -> str:
+    """创建会话，返回 token。"""
+    token = secrets.token_hex(32)
+    SESSION_STORE[token] = {"expires": datetime.now() + timedelta(hours=72)}
+    return token
+
+def _validate_session(token: str) -> bool:
+    """验证会话 token。"""
+    if not token or token not in SESSION_STORE:
+        return False
+    if datetime.now() > SESSION_STORE[token]["expires"]:
+        del SESSION_STORE[token]
+        return False
+    return True
+
+def _get_auth_token(headers) -> str:
+    """从 Cookie 提取 auth token。"""
+    cookie_header = headers.get("Cookie", "")
+    if not cookie_header:
+        return None
+    cookie = SimpleCookie()
+    cookie.load(cookie_header)
+    return cookie.get("auth_token", None).value if cookie.get("auth_token") else None
 
 # ============================================================
 # 数据库
@@ -421,6 +485,19 @@ class RequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {args[0]}")
 
+    def _require_auth(self) -> bool:
+        """检查认证，未登录返回 False。"""
+        token = _get_auth_token(self.headers)
+        if not _validate_session(token):
+            self._send_json({"error": "请先登录"}, 401)
+            return False
+        return True
+
+    def _set_auth_cookie(self, token: str, max_age: int = 259200):
+        """设置认证 cookie（默认 3 天）。"""
+        self.send_header("Set-Cookie",
+            f"auth_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}")
+
     def _send_json(self, data, status=200):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -452,6 +529,39 @@ class RequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         params = parse_qs(parsed.query)
+
+        # ---- 公开路由（无需认证） ----
+        if path == "/api/auth/status":
+            token = _get_auth_token(self.headers)
+            self._send_json({
+                "password_set": _is_password_set(),
+                "authenticated": _validate_session(token),
+            })
+            return
+
+        elif path == "/login.html":
+            self._send_file(STATIC_DIR / "login.html", "text/html; charset=utf-8")
+            return
+
+        # ---- 公开资源 ----
+        if path.startswith("/static/"):
+            fp = STATIC_DIR / path.replace("/static/", "", 1)
+            ext_map = {".css":"text/css",".js":"application/javascript",".png":"image/png",".svg":"image/svg+xml"}
+            self._send_file(fp, ext_map.get(Path(path).suffix, "application/octet-stream"))
+            return
+
+        # ---- 主页：未登录 → 登录页，已登录 → 主应用 ----
+        if path == "/" or path == "/index.html":
+            token = _get_auth_token(self.headers)
+            if _validate_session(token):
+                self._send_file(STATIC_DIR / "index.html", "text/html; charset=utf-8")
+            else:
+                self._send_file(STATIC_DIR / "login.html", "text/html; charset=utf-8")
+            return
+
+        # ---- 以下需要认证 ----
+        if not self._require_auth():
+            return
 
         if path == "/api/today":
             data = db_get_record(date.today().isoformat()) or {"tasks":[],"learnings":[],"outputs":[],"experiences":[]}
@@ -488,20 +598,57 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/settings":
             self._send_json(db_get_settings())
 
-        elif path == "/" or path == "/index.html":
-            self._send_file(STATIC_DIR / "index.html", "text/html; charset=utf-8")
-
-        elif path.startswith("/static/"):
-            fp = STATIC_DIR / path.replace("/static/", "", 1)
-            ext_map = {".css":"text/css",".js":"application/javascript",".png":"image/png",".svg":"image/svg+xml"}
-            self._send_file(fp, ext_map.get(Path(path).suffix, "application/octet-stream"))
-
         else:
-            self._send_file(STATIC_DIR / "index.html", "text/html; charset=utf-8")
+            self._send_json({"error": "Not Found"}, 404)
 
     def do_POST(self):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+
+        # ---- 公开路由（无需认证） ----
+        if path == "/api/auth/setup":
+            if _is_password_set():
+                self._send_json({"error": "密码已设置"}, 400)
+                return
+            body = self._read_body()
+            pw = body.get("password", "").strip()
+            if len(pw) < 4:
+                self._send_json({"error": "密码至少 4 位"}, 400)
+                return
+            _set_password(pw)
+            token = _create_session()
+            self._send_json({"ok": True, "need_login": False})
+            return
+
+        elif path == "/api/auth/login":
+            body = self._read_body()
+            pw = body.get("password", "")
+            if not _is_password_set():
+                self._send_json({"error": "请先设置密码", "need_setup": True}, 400)
+                return
+            if _check_password(pw):
+                token = _create_session()
+                self.send_response(200)
+                self._set_auth_cookie(token)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8"))
+                return
+            else:
+                self._send_json({"ok": False, "error": "密码错误"}, 401)
+                return
+
+        elif path == "/api/auth/logout":
+            token = _get_auth_token(self.headers)
+            if token and token in SESSION_STORE:
+                del SESSION_STORE[token]
+            self._send_json({"ok": True})
+            return
+
+        # ---- 以下需要认证 ----
+        if not self._require_auth():
+            return
 
         if path == "/api/save":
             body = self._read_body()
@@ -533,6 +680,20 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True})
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif path == "/api/auth/change-password":
+            body = self._read_body()
+            old_pw = body.get("old_password", "")
+            new_pw = body.get("new_password", "").strip()
+            if not _check_password(old_pw):
+                self._send_json({"ok": False, "error": "原密码错误"}, 400)
+                return
+            if len(new_pw) < 4:
+                self._send_json({"ok": False, "error": "新密码至少 4 位"}, 400)
+                return
+            _set_password(new_pw)
+            self._send_json({"ok": True})
+            return
 
         else:
             self._send_json({"error": "Not Found"}, 404)
