@@ -547,7 +547,7 @@ async function generateReport() {
   }
 }
 
-function getISOWeek(d){const date=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const dayNum=date.getUTCDay()||7;date.setUTCDate(date.getUTCDate()+4-dayNum);const yearStart=new Date(Date.UTC(date.getUTCFullYear(),0,1));return{year:date.getUTCFullYear(),week:Math.ceil(((date-yearStart)/86400000+1)/7)};}
+function getISOWeek(d){const t=new Date(d.valueOf());const day=(t.getDay()+6)%7;t.setDate(t.getDate()-day+3);const jan4=new Date(t.getFullYear(),0,4);const w1m=new Date(jan4);w1m.setDate(jan4.getDate()-(jan4.getDay()+6)%7);return{year:t.getFullYear(),week:1+Math.round((t-w1m)/604800000)};}
 
 function renderReport(data){
   if (!data) return;
@@ -566,9 +566,8 @@ function renderReport(data){
 
   let html = `
   <div class="report-header-card">
-    <div class="report-week-title">📊 第 ${data.week} 周周报</div>
-    <div class="report-date-range">${data.monday} ~ ${data.sunday} · ${data.record_count} 天</div>
-    ${cwHtml?`<div class="report-company-weeks">🏢 ${cwHtml}</div>`:''}
+    <div class="report-week-title">📊 周报 ${cwHtml||''}</div>
+    <div class="report-date-range">${data.monday} ~ ${data.sunday} · ${data.record_count} 天记录</div>
     <div class="stat-grid">
       <div class="stat-item"><div class="stat-value">${data.tasks_done}/${data.tasks_total}</div><div class="stat-label">完成/总任务</div></div>
       <div class="stat-item"><div class="stat-value">${rate}%</div><div class="stat-label">完成率</div></div>
