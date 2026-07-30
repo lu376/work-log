@@ -14,16 +14,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('view-today').addEventListener('input', debounceAutoSave);
   document.getElementById('view-today').addEventListener('change', debounceAutoSave);
   document.getElementById('view-today').addEventListener('blur', autoSave, true);  // 焦点离开时保存
-  // 离开页面前强制保存（fetch + keepalive 比 sendBeacon 更可靠）
-  window.addEventListener('beforeunload', () => {
+  // 多种时机保存，确保数据不丢
+  function forceSave() {
     if (editingDate) return;
-    fetch('/api/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: TODAY, tasks: currentData.tasks, learnings: currentData.learnings, outputs: currentData.outputs, experiences: currentData.experiences }),
-      keepalive: true
-    });
-  });
+    const payload = JSON.stringify({ date: TODAY, tasks: currentData.tasks, learnings: currentData.learnings, outputs: currentData.outputs, experiences: currentData.experiences });
+    fetch('/api/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true });
+  }
+  window.addEventListener('beforeunload', forceSave);
+  window.addEventListener('pagehide', forceSave);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) forceSave(); });
   // 恢复上次的 Tab
   const lastView = localStorage.getItem('lastView');
   if (lastView && (lastView === 'history' || lastView === 'report')) {
@@ -377,7 +376,7 @@ function updateAllCounts(ctx){const pfx=ctx==='today'?'':'hist-';const set=(id,v
 // ============================================================
 // Save
 // ============================================================
-function debounceAutoSave(){clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(autoSave,300);}
+function debounceAutoSave(){clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(autoSave,100);}
 async function autoSave(){if(editingDate)return;try{const r=await api('/api/save','POST',{date:TODAY,tasks:currentData.tasks,learnings:currentData.learnings,outputs:currentData.outputs,experiences:currentData.experiences});if(r&&r.ok)document.getElementById('lastSaved').textContent='已保存 '+new Date().toLocaleTimeString();}catch(e){}}
 async function saveAll(dateOverride){const btn=dateOverride?document.getElementById('histSaveBtn'):document.getElementById('saveBtn');if(btn)btn.textContent='⏳ 保存中...';const sd=dateOverride||TODAY;try{await api('/api/save','POST',{date:sd,...currentData});if(btn){btn.textContent='✅ 已保存';setTimeout(()=>{btn.textContent='💾 保存记录';},2000);}if(!dateOverride)document.getElementById('lastSaved').textContent=`保存于 ${new Date().toLocaleTimeString()}`;showToast('保存成功');}catch(e){if(btn)btn.textContent='❌ 失败';}}
 

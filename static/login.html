@@ -27,12 +27,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   <div class="title" id="title">工作记录</div>
   <div class="subtitle" id="subtitle">登录你的账号</div>
   <form onsubmit="handleLogin(event)" id="loginForm">
-    <input class="input" id="username" placeholder="用户名" autofocus>
-    <input type="password" class="input" id="password" placeholder="密码">
+    <input class="input" id="username" placeholder="用户名" autofocus autocomplete="username">
+    <input type="password" class="input" id="password" placeholder="密码" autocomplete="current-password">
     <button type="submit" class="btn" id="btn">登录</button>
   </form>
   <div class="error" id="error"></div>
-  <button class="btn-outline" onclick="toggleMode()" id="toggleBtn">没有账号？注册</button>
+  <div style="font-size:12px;color:var(--text-secondary);margin-top:12px;">刷新后请登录原账号，数据都在。</div>
+  <button class="btn-outline" onclick="toggleMode()" id="toggleBtn" style="margin-top:8px;">没有账号？注册新账号</button>
 </div>
 <script>
 let isRegister = false;
