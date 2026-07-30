@@ -581,7 +581,8 @@ def main():
         except Exception: pass
 
     parser = argparse.ArgumentParser(description="工作记录 Web 应用 (SQLite)")
-    parser.add_argument("-p", "--port", type=int, default=8080, help="端口 (默认 8080)")
+    default_port = int(os.environ.get("PORT", 8080))
+    parser.add_argument("-p", "--port", type=int, default=default_port, help=f"端口 (默认 {default_port})")
     parser.add_argument("-H", "--host", type=str, default="0.0.0.0", help="监听地址")
     args = parser.parse_args()
 
