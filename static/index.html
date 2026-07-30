@@ -214,7 +214,10 @@ body {
   <div class="view" id="view-report">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
       <span style="font-size:15px;font-weight:600;">📊 周报</span>
-      <button class="gear-btn" onclick="openSettings()" title="入职日期设置">⚙️</button>
+      <button class="gear-btn" onclick="openSettings()" title="入职日期设置" style="font-size:16px;">⚙️ 入职</button>
+    </div>
+    <div id="settingsHint" style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;padding:8px 12px;background:var(--card);border-radius:8px;display:none;">
+      💡 <a href="javascript:openSettings()" style="color:var(--primary);text-decoration:underline;">设置入职日期</a>，周报自动计算入职第几周
     </div>
     <div class="week-nav" id="weekNav"></div>
     <button class="gen-btn" id="genBtn" onclick="generateReport()">🚀 生成周报</button>
@@ -342,7 +345,14 @@ async function loadSettings() {
   try { settings = await api('/api/settings'); } catch(e) { settings = { companies: [] }; }
 }
 async function saveSettingsData() {
-  try { await api('/api/settings', 'POST', settings); showToast('设置已保存'); } catch(e) { showToast('保存失败'); }
+  try {
+    await api('/api/settings', 'POST', settings);
+    showToast('设置已保存');
+    // Update hint
+    const hint = document.getElementById('settingsHint');
+    if (hint) hint.style.display = 'none';
+    closeSettings();
+  } catch(e) { showToast('保存失败'); }
 }
 
 function openSettings() {
@@ -630,6 +640,15 @@ function initReport() {
     <button onclick="navigateWeek(1)">下周 ›</button>`;
   document.getElementById('reportContent').innerHTML = '';
   document.getElementById('genBtn').style.display = 'block';
+  // Show hint if no companies configured
+  loadSettings().then(() => {
+    const hint = document.getElementById('settingsHint');
+    if (hint && (!settings.companies || !settings.companies.length)) {
+      hint.style.display = 'block';
+    } else if (hint) {
+      hint.style.display = 'none';
+    }
+  });
 }
 function navigateWeek(delta) {
   const ref = new Date(currentReportYear, 0, 4);
