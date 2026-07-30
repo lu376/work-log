@@ -282,6 +282,11 @@ document.addEventListener('DOMContentLoaded', () => {
   updateHeaderDate(); loadToday(); loadSettings(); loadRefs();
   document.getElementById('view-today').addEventListener('input', debounceAutoSave);
   document.getElementById('view-today').addEventListener('change', debounceAutoSave);
+  // 恢复上次的 Tab
+  const lastView = localStorage.getItem('lastView');
+  if (lastView && (lastView === 'history' || lastView === 'report')) {
+    switchView(lastView);
+  }
   // 任意图片点击放大（事件委托）
   document.body.addEventListener('click', (e) => {
     if (e.target.tagName === 'IMG') {
@@ -300,6 +305,7 @@ function switchView(view) {
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById(`view-${view}`).classList.add('active');
   document.querySelector(`[data-view="${view}"]`).classList.add('active');
+  localStorage.setItem('lastView', view);
   if (view === 'history') loadHistory();
   if (view === 'report') initReport();
 }
@@ -613,9 +619,11 @@ function closeModal(event){if(event&&event.target!==document.getElementById('mod
 // Report
 // ============================================================
 function initReport() {
-  // Show week nav without report data, wait for user to click generate
   const iso = getISOWeek(new Date());
-  currentReportYear = iso.year; currentReportWeek = iso.week;
+  const savedYear = localStorage.getItem('reportYear');
+  const savedWeek = localStorage.getItem('reportWeek');
+  currentReportYear = savedYear ? parseInt(savedYear) : iso.year;
+  currentReportWeek = savedWeek ? parseInt(savedWeek) : iso.week;
   document.getElementById('weekNav').innerHTML = `
     <button onclick="navigateWeek(-1)">‹ 上周</button>
     <span class="week-label">第 ${currentReportWeek} 周</span>
@@ -624,11 +632,12 @@ function initReport() {
   document.getElementById('genBtn').style.display = 'block';
 }
 function navigateWeek(delta) {
-  // Find the next/previous week by adjusting the date
   const ref = new Date(currentReportYear, 0, 4);
   ref.setDate(ref.getDate() - ref.getDay() + 1 + (currentReportWeek - 1 + delta) * 7);
   const iso = getISOWeek(ref);
   currentReportYear = iso.year; currentReportWeek = iso.week;
+  localStorage.setItem('reportYear', currentReportYear);
+  localStorage.setItem('reportWeek', currentReportWeek);
   document.getElementById('weekNav').innerHTML = `
     <button onclick="navigateWeek(-1)">‹ 上周</button>
     <span class="week-label">第 ${currentReportWeek} 周</span>
@@ -640,6 +649,8 @@ function navigateWeek(delta) {
 async function generateReport() {
   const btn = document.getElementById('genBtn');
   btn.textContent = '⏳ 生成中...'; btn.disabled = true;
+  localStorage.setItem('reportYear', currentReportYear);
+  localStorage.setItem('reportWeek', currentReportWeek);
   try {
     await loadSettings();
     const data = await api(`/api/report?year=${currentReportYear}&week=${currentReportWeek}`);
