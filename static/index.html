@@ -269,7 +269,7 @@ body {
 </div>
 
 <div class="toast" id="toast"></div>
-<input type="file" accept="image/*" id="uploadInput" style="display:none" onchange="handleUpload(this)">
+<input type="file" accept="image/*" id="uploadInput" style="position:fixed;left:-9999px;top:0;" onchange="handleUpload(this)">
 
 <script>
 const TODAY = new Date().toISOString().split('T')[0];
