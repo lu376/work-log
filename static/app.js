@@ -94,7 +94,7 @@ function switchView(view) {
   document.getElementById(`view-${view}`).classList.add('active');
   document.querySelector(`[data-view="${view}"]`).classList.add('active');
   localStorage.setItem('lastView', view);
-  if (view === 'today') loadToday();  // 切回今日重新加载确保最新
+  // 切回今日不重新加载，避免覆盖正在编辑的数据
   if (view === 'history') loadHistory();
   if (view === 'report') initReport();
 }
@@ -232,14 +232,17 @@ function renderItemsTo(ctx, field, list, items, style) {
   list.innerHTML = items.map((text,i) => {
     const imgMatch = matchImageUrl(text);
     let imgHtml = '';
+    let displayText = text;
     if (imgMatch) {
       imgHtml = `<img class="ref-image-thumb" src="${esc(imgMatch.url)}" alt="${esc(imgMatch.alt||'图片')}" onclick="event.stopPropagation();openLightbox('${esc(imgMatch.url)}')" loading="lazy">`;
+      // 纯图片 URL 不显示文字
+      displayText = imgMatch.textBefore || '';
     }
     return `
     <li class="item-row ${imgMatch?'has-image':''}">
       ${numbered?`<span class="item-number">${i+1}.</span>`:`<span class="item-dot">•</span>`}
       <div style="flex:1;min-width:0;">
-        <div class="item-input" contenteditable oninput="setItemText('${ctx}','${field}',${i},this.innerText)" onblur="setItemText('${ctx}','${field}',${i},this.innerText)">${imgMatch ? esc(imgMatch.textBefore||text) : esc(text)}</div>
+        <div class="item-input" contenteditable oninput="setItemText('${ctx}','${field}',${i},this.innerText)" onblur="setItemText('${ctx}','${field}',${i},this.innerText)">${esc(displayText)}</div>
         ${imgHtml}
       </div>
       <button class="item-delete" onclick="delItem('${ctx}','${field}',${i})">×</button>
