@@ -1,0 +1,10 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python app.py"
+healthcheckPath = "/api/auth/status"
+
+[deploy.volumes]
+# 持久化 daily/ 目录（数据库+上传文件）
+daily = "/app/daily"
