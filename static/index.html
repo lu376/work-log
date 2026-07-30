@@ -302,6 +302,49 @@ document.addEventListener('DOMContentLoaded', () => {
   if (lastView && (lastView === 'history' || lastView === 'report')) {
     switchView(lastView);
   }
+  // 粘贴图片自动上传
+  document.body.addEventListener('paste', async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const b64 = reader.result;
+          try {
+            const res = await api('/api/upload', 'POST', {data: b64});
+            if (res && res.ok) {
+              const url = res.url;
+              // 插入到当前聚焦的 contenteditable 元素
+              const sel = window.getSelection();
+              if (sel.rangeCount && sel.focusNode) {
+                const editable = sel.focusNode.closest?.('[contenteditable]') || sel.focusNode.parentElement?.closest?.('[contenteditable]');
+                if (editable) {
+                  const img = document.createElement('img');
+                  img.src = url;
+                  img.style.maxWidth = '100%';
+                  img.style.borderRadius = '6px';
+                  img.style.margin = '4px 0';
+                  const range = sel.getRangeAt(0);
+                  range.deleteContents();
+                  range.insertNode(img);
+                  range.collapse(false);
+                  // Trigger input to save
+                  editable.dispatchEvent(new Event('input', {bubbles:true}));
+                }
+              }
+              showToast('图片已粘贴');
+            }
+          } catch(err) { showToast('上传失败'); }
+        };
+        reader.readAsDataURL(file);
+        break;
+      }
+    }
+  });
+
   // 任意图片点击放大（事件委托）
   document.body.addEventListener('click', (e) => {
     if (e.target.tagName === 'IMG') {
@@ -475,13 +518,12 @@ function renderItemsTo(ctx, field, list, items, style) {
 // ============================================================
 function matchImageUrl(text) {
   if (!text) return null;
-  // Match image URLs: http(s)://...jpg/png/gif/webp/svg or data:image/...
-  const imgRe = /(https?:\/\/\S+\.(?:jpg|jpeg|png|gif|webp|svg)(?:\?\S*)?|data:image\/\S+)/i;
+  // 匹配：http(s)://、相对路径 /uploads/、data:image、blob
+  const imgRe = /((?:https?:\/\/|\/)\S+\.(?:jpg|jpeg|png|gif|webp|svg)(?:\?\S*)?|data:image\/\S+|blob:https?:\/\/\S+)/i;
   const m = text.match(imgRe);
   if (!m) return null;
   const url = m[1];
   const textBefore = text.replace(url, '').trim();
-  // Extract alt text
   let alt = '';
   const altMatch = textBefore.match(/^(.+?)[：:]\s*$/);
   if (altMatch) alt = altMatch[1];
