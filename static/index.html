@@ -286,11 +286,16 @@ document.addEventListener('DOMContentLoaded', () => {
   updateHeaderDate(); loadToday(); loadSettings(); loadRefs();
   document.getElementById('view-today').addEventListener('input', debounceAutoSave);
   document.getElementById('view-today').addEventListener('change', debounceAutoSave);
-  // 离开页面前强制保存
+  document.getElementById('view-today').addEventListener('blur', autoSave, true);  // 焦点离开时保存
+  // 离开页面前强制保存（fetch + keepalive 比 sendBeacon 更可靠）
   window.addEventListener('beforeunload', () => {
     if (editingDate) return;
-    const data = { date: TODAY, tasks: currentData.tasks, learnings: currentData.learnings, outputs: currentData.outputs, experiences: currentData.experiences };
-    navigator.sendBeacon('/api/save', JSON.stringify(data));
+    fetch('/api/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: TODAY, tasks: currentData.tasks, learnings: currentData.learnings, outputs: currentData.outputs, experiences: currentData.experiences }),
+      keepalive: true
+    });
   });
   // 恢复上次的 Tab
   const lastView = localStorage.getItem('lastView');
@@ -311,11 +316,16 @@ function updateHeaderDate() {
   document.getElementById('headerDate').textContent = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${wd[now.getDay()]}`;
 }
 function switchView(view) {
+  // 切走今日时立即保存
+  if (!editingDate && !document.getElementById('view-today').classList.contains('active')) {
+    autoSave();
+  }
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById(`view-${view}`).classList.add('active');
   document.querySelector(`[data-view="${view}"]`).classList.add('active');
   localStorage.setItem('lastView', view);
+  if (view === 'today') loadToday();  // 切回今日重新加载确保最新
   if (view === 'history') loadHistory();
   if (view === 'report') initReport();
 }
@@ -593,7 +603,7 @@ function updateAllCounts(ctx){const pfx=ctx==='today'?'':'hist-';const set=(id,v
 // ============================================================
 // Save
 // ============================================================
-function debounceAutoSave(){clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(autoSave,800);}
+function debounceAutoSave(){clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(autoSave,500);}
 async function autoSave(){if(editingDate)return;try{await api('/api/save','POST',{date:TODAY,...currentData});document.getElementById('lastSaved').textContent=`自动保存于 ${new Date().toLocaleTimeString()}`;}catch(e){}}
 async function saveAll(dateOverride){const btn=dateOverride?document.getElementById('histSaveBtn'):document.getElementById('saveBtn');if(btn)btn.textContent='⏳ 保存中...';const sd=dateOverride||TODAY;try{await api('/api/save','POST',{date:sd,...currentData});if(btn){btn.textContent='✅ 已保存';setTimeout(()=>{btn.textContent='💾 保存记录';},2000);}if(!dateOverride)document.getElementById('lastSaved').textContent=`保存于 ${new Date().toLocaleTimeString()}`;showToast('保存成功');}catch(e){if(btn)btn.textContent='❌ 失败';}}
 
