@@ -451,6 +451,18 @@ function initReport() {
   });
 }
 
+function calcCompanyWeekForMonday(mondayStr) {
+  // 根据入职日期计算到指定周一的入职周数
+  const monday = new Date(mondayStr + 'T00:00:00');
+  const result = [];
+  for (const c of (settings.companies || [])) {
+    const start = new Date(c.start_date + 'T00:00:00');
+    const days = Math.floor((monday - start) / 86400000);
+    if (days >= 0) result.push({ name: c.name, week_num: Math.floor(days / 7) + 1 });
+  }
+  return result;
+}
+
 function refreshWeekNav() {
   const weeks = settings.current_weeks || settings.company_weeks || [];
   let label;
@@ -460,9 +472,24 @@ function refreshWeekNav() {
     label = `第 ${currentReportWeek} 周`;
   }
   document.getElementById('weekNav').innerHTML = `
-    <button onclick="navigateWeek(-1)">‹ 上周</button>
+    <button onclick="navigateWeek(-1)">‹</button>
     <span class="week-label">${label}</span>
-    <button onclick="navigateWeek(1)">下周 ›</button>`;
+    <button onclick="navigateWeek(1)">›</button>
+    <button onclick="goCurrentWeek()" style="font-size:12px;">今天</button>`;
+}
+
+function goCurrentWeek() {
+  const iso = getISOWeek(new Date());
+  currentReportYear = iso.year;
+  currentReportWeek = iso.week;
+  localStorage.removeItem('reportYear');
+  localStorage.removeItem('reportWeek');
+  refreshWeekNav();
+  document.getElementById('reportContent').innerHTML = '';
+  const btn = document.getElementById('genBtn');
+  btn.style.display = 'block';
+  btn.textContent = '🚀 生成周报';
+  btn.disabled = false;
 }
 function navigateWeek(delta) {
   const jan4 = new Date(currentReportYear, 0, 4);
@@ -475,9 +502,9 @@ function navigateWeek(delta) {
   currentReportYear = iso.year; currentReportWeek = iso.week;
   localStorage.setItem('reportYear', currentReportYear);
   localStorage.setItem('reportWeek', currentReportWeek);
-  if (settings.companies && settings.companies.length) {
-    loadSettings();
-  }
+  // 用目标周一计算入职周数
+  const mondayStr = targetMonday.getFullYear() + '-' + String(targetMonday.getMonth()+1).padStart(2,'0') + '-' + String(targetMonday.getDate()).padStart(2,'0');
+  settings.company_weeks = calcCompanyWeekForMonday(mondayStr);
   refreshWeekNav();
   document.getElementById('reportContent').innerHTML = '';
   const btn = document.getElementById('genBtn');
@@ -505,9 +532,11 @@ async function generateReport() {
 function getISOWeek(d){const date=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const dayNum=date.getUTCDay()||7;date.setUTCDate(date.getUTCDate()+4-dayNum);const yearStart=new Date(Date.UTC(date.getUTCFullYear(),0,1));return{year:date.getUTCFullYear(),week:Math.ceil(((date-yearStart)/86400000+1)/7)};}
 
 function renderReport(data){
-  // 用周报的实际数据更新标题（优先使用周报的精确计算）
-  settings.company_weeks = data.company_weeks || [];
-  settings.current_weeks = null;  // 让 report 的公司周数生效
+  // 用周报返回的日期重新计算入职周数
+  if (data.monday && settings.companies) {
+    settings.company_weeks = calcCompanyWeekForMonday(data.monday);
+  }
+  settings.current_weeks = null;
   refreshWeekNav();
 
   const rate = data.completion_rate;
