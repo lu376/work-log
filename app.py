@@ -55,7 +55,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 # 认证 & 会话
 # ============================================================
 
-SESSION_STORE = {}  # token -> {"username": str, "expires": datetime}
+SESSION_STORE = {}  # 内存缓存，同时写数据库
 
 def _hash_password(password: str) -> str:
     """SHA-256 哈希。"""
@@ -91,18 +91,49 @@ def _check_user(username: str, password: str) -> bool:
 
 def _create_session(username: str) -> str:
     token = secrets.token_hex(32)
-    SESSION_STORE[token] = {"username": username, "expires": datetime.now() + timedelta(hours=72)}
+    expires = (datetime.now() + timedelta(hours=72)).isoformat()
+    # 内存缓存
+    SESSION_STORE[token] = {"username": username, "expires": expires}
+    # 写入数据库，服务重启后能恢复
+    conn = get_db()
+    cur = conn.cursor()
+    _db_exec(cur, "INSERT OR REPLACE INTO sessions (token, username, expires) VALUES (?,?,?)", (token, username, expires))
+    if USE_PG:
+        _db_exec(cur, "INSERT INTO sessions (token, username, expires) VALUES (?,?,?) ON CONFLICT (token) DO UPDATE SET username=?, expires=?", (token, username, expires, username, expires))
+    conn.commit()
+    if USE_PG: cur.close()
+    conn.close()
     return token
 
 def _validate_session(token: str) -> str | None:
-    """验证会话，返回 username 或 None。"""
-    if not token or token not in SESSION_STORE:
+    """验证会话，先查内存缓存，再查数据库。"""
+    if not token:
         return None
-    s = SESSION_STORE[token]
-    if datetime.now() > s["expires"]:
+    # 先查内存
+    if token in SESSION_STORE:
+        s = SESSION_STORE[token]
+        if datetime.now().isoformat() < s["expires"]:
+            return s["username"]
         del SESSION_STORE[token]
+    # 查数据库（服务重启后恢复会话）
+    conn = get_db()
+    cur = conn.cursor()
+    row = _db_fetchone(cur, "SELECT username, expires FROM sessions WHERE token=?", (token,))
+    if USE_PG: cur.close()
+    conn.close()
+    if not row:
         return None
-    return s["username"]
+    if datetime.now().isoformat() >= row["expires"]:
+        # 清理过期
+        conn2 = get_db(); cur2 = conn2.cursor()
+        _db_exec(cur2, "DELETE FROM sessions WHERE token=?", (token,))
+        conn2.commit()
+        if USE_PG: cur2.close()
+        conn2.close()
+        return None
+    # 恢复到内存缓存
+    SESSION_STORE[token] = {"username": row["username"], "expires": row["expires"]}
+    return row["username"]
 
 def _get_auth_token(headers) -> str:
     cookie_header = headers.get("Cookie", "")
@@ -129,6 +160,8 @@ def get_db():
         cur = conn.cursor()
         cur.execute("""CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at TEXT DEFAULT '')""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY, username TEXT NOT NULL, expires TEXT NOT NULL)""")
         cur.execute("""CREATE TABLE IF NOT EXISTS records (
             username TEXT DEFAULT '', date TEXT, tasks TEXT DEFAULT '[]',
             learnings TEXT DEFAULT '[]', outputs TEXT DEFAULT '[]',
@@ -147,6 +180,8 @@ def get_db():
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at TEXT DEFAULT '')""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY, username TEXT NOT NULL, expires TEXT NOT NULL)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS records (
             username TEXT DEFAULT '', date TEXT, tasks TEXT DEFAULT '[]',
             learnings TEXT DEFAULT '[]', outputs TEXT DEFAULT '[]',
