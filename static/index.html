@@ -666,7 +666,10 @@ function initReport() {
   currentReportWeek = savedWeek ? parseInt(savedWeek) : iso.week;
   refreshWeekNav();
   document.getElementById('reportContent').innerHTML = '';
-  document.getElementById('genBtn').style.display = 'block';
+  const btn = document.getElementById('genBtn');
+  btn.style.display = 'block';
+  btn.textContent = '🚀 生成周报';
+  btn.disabled = false;
   loadSettings().then(() => {
     refreshWeekNav();
     const hint = document.getElementById('settingsHint');
@@ -704,7 +707,10 @@ function navigateWeek(delta) {
   }
   refreshWeekNav();
   document.getElementById('reportContent').innerHTML = '';
-  document.getElementById('genBtn').style.display = 'block';
+  const btn = document.getElementById('genBtn');
+  btn.style.display = 'block';
+  btn.textContent = '🚀 生成周报';
+  btn.disabled = false;
 }
 
 async function generateReport() {
