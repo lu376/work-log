@@ -724,8 +724,9 @@ async function generateReport() {
 function getISOWeek(d){const date=new Date(d.getTime());date.setHours(0,0,0,0);date.setDate(date.getDate()+3-(date.getDay()+6)%7);const w1=new Date(date.getFullYear(),0,4);return{year:date.getFullYear(),week:1+Math.round(((date-w1)/86400000-3+(w1.getDay()+6)%7)/7)};}
 
 function renderReport(data){
-  // 用周报的实际数据更新标题
+  // 用周报的实际数据更新标题（优先使用周报的精确计算）
   settings.company_weeks = data.company_weeks || [];
+  settings.current_weeks = null;  // 让 report 的公司周数生效
   refreshWeekNav();
 
   const rate = data.completion_rate;
