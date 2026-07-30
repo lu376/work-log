@@ -1,4 +1,5 @@
-const TODAY = new Date().toISOString().split('T')[0];
+const d = new Date();
+const TODAY = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 let currentData = { tasks: [], learnings: [], outputs: [], experiences: [] };
 let autoSaveTimer = null;
 let editingDate = null;
