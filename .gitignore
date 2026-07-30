@@ -2,6 +2,7 @@
 daily/*.md
 daily/*.db
 daily/_settings.json
+daily/uploads/
 
 # 但保留模板
 !daily/TEMPLATE.md

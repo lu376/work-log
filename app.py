@@ -15,9 +15,11 @@ import sys
 import os
 import json
 import re
+import time
 import hashlib
 import secrets
 import sqlite3
+import base64
 import argparse
 from pathlib import Path
 from datetime import date, datetime, timedelta
@@ -36,6 +38,8 @@ DB_PATH = DAILY_DIR / "worklog.db"
 
 DAILY_DIR.mkdir(exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR = DAILY_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 # ============================================================
 # 认证 & 会话
@@ -551,6 +555,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
         # ---- 公开资源 ----
+        if path.startswith("/uploads/"):
+            fp = UPLOAD_DIR / path.replace("/uploads/", "", 1)
+            ext_map = {".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".gif":"image/gif",".webp":"image/webp"}
+            self._send_file(fp, ext_map.get(Path(fp).suffix, "application/octet-stream"))
+            return
+
         if path.startswith("/static/"):
             fp = STATIC_DIR / path.replace("/static/", "", 1)
             ext_map = {".css":"text/css",".js":"application/javascript",".png":"image/png",".svg":"image/svg+xml"}
@@ -663,6 +673,31 @@ class RequestHandler(BaseHTTPRequestHandler):
         # ---- 需要认证 ----
         user = self._require_auth()
         if not user:
+            return
+
+        if path == "/api/upload":
+            body = self._read_body()
+            b64 = body.get("data", "")
+            try:
+                # 去掉 data:image/xxx;base64, 前缀
+                if "," in b64:
+                    b64 = b64.split(",", 1)[1]
+                img_data = base64.b64decode(b64)
+                ext = ".png"
+                if img_data[:4] == b"\xff\xd8\xff\xe0" or img_data[:4] == b"\xff\xd8\xff\xe1":
+                    ext = ".jpg"
+                elif img_data[:4] == b"\x89PNG":
+                    ext = ".png"
+                elif img_data[:6] in (b"GIF87a", b"GIF89a"):
+                    ext = ".gif"
+                elif img_data[:4] == b"RIFF":
+                    ext = ".webp"
+                filename = f"{int(time.time()*1000)}_{secrets.token_hex(4)}{ext}"
+                (UPLOAD_DIR / filename).write_bytes(img_data)
+                url = f"/uploads/{filename}"
+                self._send_json({"ok": True, "url": url})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
             return
 
         if path == "/api/save":
