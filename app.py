@@ -614,7 +614,16 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json(data)
 
         elif path == "/api/settings":
-            self._send_json(db_get_settings(user))
+            s = db_get_settings(user)
+            # 计算当前入职周数
+            today = date.today()
+            cur_weeks = []
+            for c in s.get("companies", []):
+                cw = calc_company_weeks(c["start_date"], today)
+                if cw:
+                    cur_weeks.append({"name": c["name"], "week_num": cw["week_num"]})
+            s["current_weeks"] = cur_weeks
+            self._send_json(s)
 
         else:
             self._send_json({"error": "Not Found"}, 404)

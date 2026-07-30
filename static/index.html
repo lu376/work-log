@@ -174,6 +174,7 @@ body {
 <header class="app-header">
   <div class="header-row">
     <div class="app-title">📋 工作记录</div>
+    <span id="headerWeeks" style="font-size:11px;color:var(--primary);background:var(--primary-light);padding:2px 8px;border-radius:10px;display:none;"></span>
     <button onclick="logout()" style="background:none;border:none;font-size:13px;color:var(--text-secondary);cursor:pointer;padding:4px 8px;">退出</button>
   </div>
 </header>
@@ -268,7 +269,7 @@ body {
 </div>
 
 <div class="toast" id="toast"></div>
-<input type="file" accept="image/*" capture="environment" id="uploadInput" style="display:none" onchange="handleUpload(this)">
+<input type="file" accept="image/*" id="uploadInput" style="display:none" onchange="handleUpload(this)">
 
 <script>
 const TODAY = new Date().toISOString().split('T')[0];
@@ -343,6 +344,19 @@ function normalize(data) { return { tasks: data.tasks||[], learnings: data.learn
 // ============================================================
 async function loadSettings() {
   try { settings = await api('/api/settings'); } catch(e) { settings = { companies: [] }; }
+  updateHeaderWeeks();
+}
+
+function updateHeaderWeeks() {
+  const el = document.getElementById('headerWeeks');
+  if (!el) return;
+  const weeks = settings.current_weeks || [];
+  if (weeks.length) {
+    el.textContent = weeks.map(w => `${w.name}第${w.week_num}周`).join(' · ');
+    el.style.display = 'inline';
+  } else {
+    el.style.display = 'none';
+  }
 }
 async function saveSettingsData() {
   try {
