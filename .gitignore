@@ -1,0 +1,25 @@
+# 数据文件（个人隐私，不上传）
+daily/*.md
+daily/*.db
+daily/_settings.json
+
+# 但保留模板
+!daily/TEMPLATE.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
