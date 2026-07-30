@@ -129,7 +129,8 @@ function normalize(data) { return { tasks: data.tasks||[], learnings: data.learn
 // Settings
 // ============================================================
 async function loadSettings() {
-  try { settings = await api('/api/settings'); } catch(e) { settings = { companies: [] }; }
+  try { const s = await api('/api/settings'); if (s) settings = s; } catch(e) {}
+  if (!settings || !settings.companies) settings = { companies: [] };
   updateHeaderWeeks();
 }
 
@@ -521,6 +522,11 @@ async function generateReport() {
   try {
     await loadSettings();
     const data = await api(`/api/report?year=${currentReportYear}&week=${currentReportWeek}`);
+    if (!data || data.error) {
+      showToast('生成失败，请重试');
+      btn.textContent = '🚀 重试'; btn.disabled = false;
+      return;
+    }
     renderReport(data);
     btn.style.display = 'none';
   } catch(e) {
@@ -532,6 +538,7 @@ async function generateReport() {
 function getISOWeek(d){const date=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const dayNum=date.getUTCDay()||7;date.setUTCDate(date.getUTCDate()+4-dayNum);const yearStart=new Date(Date.UTC(date.getUTCFullYear(),0,1));return{year:date.getUTCFullYear(),week:Math.ceil(((date-yearStart)/86400000+1)/7)};}
 
 function renderReport(data){
+  if (!data) return;
   // 用周报返回的日期重新计算入职周数
   if (data.monday && settings.companies) {
     settings.company_weeks = calcCompanyWeekForMonday(data.monday);
