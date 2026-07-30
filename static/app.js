@@ -431,10 +431,16 @@ function closeModal(event){if(event&&event.target!==document.getElementById('mod
 function initReport() {
   const today = new Date();
   const iso = getISOWeek(today);
+  // 只在用户生成过周报时才恢复，否则显示当前周
   const savedYear = localStorage.getItem('reportYear');
   const savedWeek = localStorage.getItem('reportWeek');
-  currentReportYear = savedYear ? parseInt(savedYear) : iso.year;
-  currentReportWeek = savedWeek ? parseInt(savedWeek) : iso.week;
+  if (savedYear && savedWeek && localStorage.getItem('reportGenerated') === '1') {
+    currentReportYear = parseInt(savedYear);
+    currentReportWeek = parseInt(savedWeek);
+  } else {
+    currentReportYear = iso.year;
+    currentReportWeek = iso.week;
+  }
   refreshWeekNav();
   document.getElementById('reportContent').innerHTML = '';
   const btn = document.getElementById('genBtn');
@@ -485,6 +491,7 @@ function goCurrentWeek() {
   currentReportWeek = iso.week;
   localStorage.removeItem('reportYear');
   localStorage.removeItem('reportWeek');
+  localStorage.removeItem('reportGenerated');
   refreshWeekNav();
   document.getElementById('reportContent').innerHTML = '';
   const btn = document.getElementById('genBtn');
@@ -519,6 +526,7 @@ async function generateReport() {
   btn.textContent = '⏳ 生成中...'; btn.disabled = true;
   localStorage.setItem('reportYear', currentReportYear);
   localStorage.setItem('reportWeek', currentReportWeek);
+  localStorage.setItem('reportGenerated', '1');
   try {
     await loadSettings();
     const data = await api(`/api/report?year=${currentReportYear}&week=${currentReportWeek}`);
