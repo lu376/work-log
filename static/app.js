@@ -519,9 +519,11 @@ function navigateWeek(delta) {
   currentReportYear = iso.year; currentReportWeek = iso.week;
   localStorage.setItem('reportYear', currentReportYear);
   localStorage.setItem('reportWeek', currentReportWeek);
-  // 用目标周一计算入职周数
-  const mondayStr = targetMonday.getFullYear() + '-' + String(targetMonday.getMonth()+1).padStart(2,'0') + '-' + String(targetMonday.getDate()).padStart(2,'0');
-  settings.company_weeks = calcCompanyWeekForMonday(mondayStr);
+  // 用目标周日（与服务端一致）计算入职周数
+  const sunday = new Date(targetMonday);
+  sunday.setDate(targetMonday.getDate() + 6);
+  const sundayStr = sunday.getFullYear() + '-' + String(sunday.getMonth()+1).padStart(2,'0') + '-' + String(sunday.getDate()).padStart(2,'0');
+  settings.company_weeks = calcCompanyWeekForMonday(sundayStr);
   refreshWeekNav();
   document.getElementById('reportContent').innerHTML = '';
   const btn = document.getElementById('genBtn');
@@ -556,9 +558,10 @@ function getISOWeek(d){const t=new Date(d.valueOf());const day=(t.getDay()+6)%7;
 
 function renderReport(data){
   if (!data) return;
-  // 用周报返回的日期重新计算入职周数
-  if (data.monday && settings.companies) {
-    settings.company_weeks = calcCompanyWeekForMonday(data.monday);
+  // 用周报的周日（与服务端一致）重新计算入职周数
+  const refDate = data.sunday || data.monday;
+  if (refDate && settings.companies) {
+    settings.company_weeks = calcCompanyWeekForMonday(refDate);
   }
   settings.current_weeks = null;
   refreshWeekNav();
