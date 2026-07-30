@@ -412,7 +412,7 @@ def get_week_report_data(username: str, year: int, week: int) -> dict:
 
     rate = round(tasks_done / tasks_total * 100, 1) if tasks_total > 0 else 0
 
-    settings = db_get_settings()
+    settings = db_get_settings(username)
     company_weeks = []
     for c in settings.get("companies", []):
         cw = calc_company_weeks(c["start_date"], sunday)
