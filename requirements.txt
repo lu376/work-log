@@ -1,2 +1,1 @@
-# 工作记录工具 - 纯 Python 标准库，零外部依赖
-# 此文件仅用于 Railway 部署时触发 Python 构建
+psycopg2-binary

@@ -21,6 +21,16 @@ import secrets
 import sqlite3
 import base64
 import argparse
+
+# PostgreSQL (Railway 自动注入 DATABASE_URL)
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+USE_PG = bool(DATABASE_URL)
+if USE_PG:
+    try:
+        import psycopg2
+        import psycopg2.extras
+    except ImportError:
+        USE_PG = False
 from pathlib import Path
 from datetime import date, datetime, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -53,20 +63,29 @@ def _hash_password(password: str) -> str:
 
 def _user_exists(username: str) -> bool:
     conn = get_db()
-    row = conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone()
+    cur = conn.cursor()
+    row = _db_fetchone(cur, "SELECT 1 FROM users WHERE username=?", (username,))
+    if USE_PG: cur.close()
     conn.close()
     return bool(row)
 
 def _create_user(username: str, password: str):
     conn = get_db()
+    cur = conn.cursor()
     h = _hash_password(password)
-    conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, h))
+    if USE_PG:
+        _db_exec(cur, "INSERT INTO users (username, password_hash) VALUES (?, ?) ON CONFLICT (username) DO UPDATE SET password_hash=?", (username, h, h))
+    else:
+        _db_exec(cur, "INSERT OR REPLACE INTO users (username, password_hash) VALUES (?, ?)", (username, h))
     conn.commit()
+    if USE_PG: cur.close()
     conn.close()
 
 def _check_user(username: str, password: str) -> bool:
     conn = get_db()
-    row = conn.execute("SELECT password_hash FROM users WHERE username=?", (username,)).fetchone()
+    cur = conn.cursor()
+    row = _db_fetchone(cur, "SELECT password_hash FROM users WHERE username=?", (username,))
+    if USE_PG: cur.close()
     conn.close()
     return row and row["password_hash"] == _hash_password(password)
 
@@ -102,50 +121,93 @@ def _get_current_user(headers) -> str | None:
 # 数据库
 # ============================================================
 
-def get_db() -> sqlite3.Connection:
-    """获取数据库连接（自动创建表）。"""
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("""CREATE TABLE IF NOT EXISTS users (
-        username      TEXT PRIMARY KEY,
-        password_hash TEXT NOT NULL,
-        created_at    TEXT DEFAULT ''
-    )""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS records (
-        username    TEXT DEFAULT '',
-        date        TEXT,
-        tasks       TEXT DEFAULT '[]',
-        learnings   TEXT DEFAULT '[]',
-        outputs     TEXT DEFAULT '[]',
-        experiences TEXT DEFAULT '[]',
-        updated_at  TEXT,
-        PRIMARY KEY (username, date)
-    )""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS refs (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        username   TEXT DEFAULT '',
-        content    TEXT NOT NULL,
-        sort_order INTEGER DEFAULT 0
-    )""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS settings (
-        username TEXT DEFAULT '',
-        key      TEXT,
-        value    TEXT DEFAULT '{}',
-        PRIMARY KEY (username, key)
-    )""")
-    # 兼容旧数据：给无 username 的行补上默认值
-    conn.execute("UPDATE records SET username='default' WHERE username='' OR username IS NULL")
-    conn.execute("UPDATE refs SET username='default' WHERE username='' OR username IS NULL")
-    conn.execute("UPDATE settings SET username='default' WHERE username='' OR username IS NULL")
-    conn.commit()
-    return conn
+def get_db():
+    """获取数据库连接（自动检测 SQLite 或 PostgreSQL）。"""
+    if USE_PG:
+        conn = psycopg2.connect(DATABASE_URL)
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at TEXT DEFAULT '')""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS records (
+            username TEXT DEFAULT '', date TEXT, tasks TEXT DEFAULT '[]',
+            learnings TEXT DEFAULT '[]', outputs TEXT DEFAULT '[]',
+            experiences TEXT DEFAULT '[]', updated_at TEXT,
+            PRIMARY KEY (username, date))""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS refs (
+            id SERIAL PRIMARY KEY, username TEXT DEFAULT '',
+            content TEXT NOT NULL, sort_order INTEGER DEFAULT 0)""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS settings (
+            username TEXT DEFAULT '', key TEXT, value TEXT DEFAULT '{}',
+            PRIMARY KEY (username, key))""")
+        return conn
+    else:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at TEXT DEFAULT '')""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS records (
+            username TEXT DEFAULT '', date TEXT, tasks TEXT DEFAULT '[]',
+            learnings TEXT DEFAULT '[]', outputs TEXT DEFAULT '[]',
+            experiences TEXT DEFAULT '[]', updated_at TEXT,
+            PRIMARY KEY (username, date))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS refs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT DEFAULT '',
+            content TEXT NOT NULL, sort_order INTEGER DEFAULT 0)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS settings (
+            username TEXT DEFAULT '', key TEXT, value TEXT DEFAULT '{}',
+            PRIMARY KEY (username, key))""")
+        conn.execute("UPDATE records SET username='default' WHERE username='' OR username IS NULL")
+        conn.execute("UPDATE refs SET username='default' WHERE username='' OR username IS NULL")
+        conn.execute("UPDATE settings SET username='default' WHERE username='' OR username IS NULL")
+        conn.commit()
+        return conn
 
+
+def _ph():
+    """返回数据库占位符。"""
+    return "%s" if USE_PG else "?"
+
+def _db_exec(cur, sql, params=()):
+    """执行 SQL，自动转换占位符。"""
+    if USE_PG:
+        sql = sql.replace("?", "%s")
+    cur.execute(sql, params)
+
+def _db_fetchone(cur, sql, params=()):
+    """查询单行，返回 dict-like。"""
+    if USE_PG:
+        sql = sql.replace("?", "%s")
+        cur.execute(sql, params)
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cur.description]
+        return dict(zip(cols, row))
+    else:
+        cur.execute(sql, params)
+        return cur.fetchone()
+
+def _db_fetchall(cur, sql, params=()):
+    """查询多行，返回 dict-like 列表。"""
+    if USE_PG:
+        sql = sql.replace("?", "%s")
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        if not rows:
+            return []
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
+    else:
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 def migrate_from_files():
-    """首次启动时从 markdown 文件迁移数据到 SQLite。"""
-    # 检查是否需要迁移
+    """首次启动时从 markdown 文件迁移数据到 SQLite（仅 SQLite 模式）。"""
+    if USE_PG:
+        print("[info] PostgreSQL mode, skipping markdown migration.")
+        return
     conn = get_db()
     count = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
     if count > 0:
@@ -266,84 +328,90 @@ def _parse_md_file(path: Path) -> dict:
 # ============================================================
 
 def db_get_record(username: str, date_str: str) -> dict:
-    conn = get_db()
-    row = conn.execute("SELECT * FROM records WHERE username=? AND date=?", (username, date_str)).fetchone()
+    conn = get_db(); cur = conn.cursor()
+    row = _db_fetchone(cur, "SELECT * FROM records WHERE username=? AND date=?", (username, date_str))
+    if USE_PG: cur.close()
     conn.close()
-    if not row:
-        return None
-    return {
-        "tasks": json.loads(row["tasks"]),
-        "learnings": json.loads(row["learnings"]),
-        "outputs": json.loads(row["outputs"]),
-        "experiences": json.loads(row["experiences"]),
-    }
+    if not row: return None
+    return {"tasks": json.loads(row["tasks"]), "learnings": json.loads(row["learnings"]),
+            "outputs": json.loads(row["outputs"]), "experiences": json.loads(row["experiences"])}
 
 def db_save_record(username: str, date_str: str, data: dict):
-    conn = get_db()
-    conn.execute("""INSERT OR REPLACE INTO records (username, date, tasks, learnings, outputs, experiences, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                 (username, date_str,
-                  json.dumps(data.get("tasks", []), ensure_ascii=False),
-                  json.dumps(data.get("learnings", []), ensure_ascii=False),
-                  json.dumps(data.get("outputs", []), ensure_ascii=False),
-                  json.dumps(data.get("experiences", []), ensure_ascii=False),
-                  datetime.now().isoformat()))
+    conn = get_db(); cur = conn.cursor()
+    t = json.dumps(data.get("tasks",[]), ensure_ascii=False)
+    l = json.dumps(data.get("learnings",[]), ensure_ascii=False)
+    o = json.dumps(data.get("outputs",[]), ensure_ascii=False)
+    e = json.dumps(data.get("experiences",[]), ensure_ascii=False)
+    now = datetime.now().isoformat()
+    if USE_PG:
+        _db_exec(cur, """INSERT INTO records (username, date, tasks, learnings, outputs, experiences, updated_at)
+            VALUES (?,?,?,?,?,?,?) ON CONFLICT (username, date) DO UPDATE SET
+            tasks=?, learnings=?, outputs=?, experiences=?, updated_at=?""",
+            (username, date_str, t, l, o, e, now, t, l, o, e, now))
+    else:
+        _db_exec(cur, """INSERT OR REPLACE INTO records (username, date, tasks, learnings, outputs, experiences, updated_at)
+            VALUES (?,?,?,?,?,?,?)""", (username, date_str, t, l, o, e, now))
     conn.commit()
+    if USE_PG: cur.close()
     conn.close()
 
 def db_delete_record(username: str, date_str: str):
-    conn = get_db()
-    conn.execute("DELETE FROM records WHERE username=? AND date=?", (username, date_str))
+    conn = get_db(); cur = conn.cursor()
+    _db_exec(cur, "DELETE FROM records WHERE username=? AND date=?", (username, date_str))
     conn.commit()
+    if USE_PG: cur.close()
     conn.close()
 
 def db_get_dates(username: str) -> list:
-    conn = get_db()
-    rows = conn.execute("SELECT date FROM records WHERE username=? ORDER BY date DESC", (username,)).fetchall()
+    conn = get_db(); cur = conn.cursor()
+    rows = _db_fetchall(cur, "SELECT date FROM records WHERE username=? ORDER BY date DESC", (username,))
+    if USE_PG: cur.close()
     conn.close()
     return [r["date"] for r in rows]
 
 def db_get_refs(username: str) -> list:
-    conn = get_db()
-    rows = conn.execute("SELECT content FROM refs WHERE username=? ORDER BY sort_order", (username,)).fetchall()
+    conn = get_db(); cur = conn.cursor()
+    rows = _db_fetchall(cur, "SELECT content FROM refs WHERE username=? ORDER BY sort_order", (username,))
+    if USE_PG: cur.close()
     conn.close()
     return [r["content"] for r in rows]
 
 def db_save_refs(username: str, refs: list):
-    conn = get_db()
-    conn.execute("DELETE FROM refs WHERE username=?", (username,))
+    conn = get_db(); cur = conn.cursor()
+    _db_exec(cur, "DELETE FROM refs WHERE username=?", (username,))
     for i, content in enumerate(refs):
-        conn.execute("INSERT INTO refs (username, content, sort_order) VALUES (?, ?, ?)", (username, content, i))
+        _db_exec(cur, "INSERT INTO refs (username, content, sort_order) VALUES (?,?,?)", (username, content, i))
     conn.commit()
+    if USE_PG: cur.close()
     conn.close()
 
 def db_get_settings(username: str) -> dict:
-    conn = get_db()
-    row = conn.execute("SELECT value FROM settings WHERE username=? AND key='companies'", (username,)).fetchone()
+    conn = get_db(); cur = conn.cursor()
+    row = _db_fetchone(cur, "SELECT value FROM settings WHERE username=? AND key='companies'", (username,))
+    if USE_PG: cur.close()
     conn.close()
-    if not row:
-        return {"companies": []}
-    try:
-        return {"companies": json.loads(row["value"])}
-    except Exception:
-        return {"companies": []}
+    if not row: return {"companies": []}
+    try: return {"companies": json.loads(row["value"])}
+    except: return {"companies": []}
 
 def db_save_settings(username: str, data: dict):
-    conn = get_db()
+    conn = get_db(); cur = conn.cursor()
     companies = json.dumps(data.get("companies", []), ensure_ascii=False)
-    conn.execute("INSERT OR REPLACE INTO settings (username, key, value) VALUES (?, 'companies', ?)", (username, companies))
+    if USE_PG:
+        _db_exec(cur, "INSERT INTO settings (username, key, value) VALUES (?,'companies',?) ON CONFLICT (username, key) DO UPDATE SET value=?", (username, companies, companies))
+    else:
+        _db_exec(cur, "INSERT OR REPLACE INTO settings (username, key, value) VALUES (?,'companies',?)", (username, companies))
     conn.commit()
+    if USE_PG: cur.close()
     conn.close()
 
 def db_get_week_records(username: str, year: int, week: int) -> list:
-    jan4 = date(year, 1, 4)
-    first_monday = jan4 - timedelta(days=jan4.weekday())
-    monday = first_monday + timedelta(weeks=week - 1)
-    sunday = monday + timedelta(days=6)
-
-    conn = get_db()
-    rows = conn.execute("SELECT * FROM records WHERE username=? AND date BETWEEN ? AND ? ORDER BY date",
-                        (username, monday.isoformat(), sunday.isoformat())).fetchall()
+    jan4 = date(year, 1, 4); fm = jan4 - timedelta(days=jan4.weekday())
+    monday = fm + timedelta(weeks=week - 1); sunday = monday + timedelta(days=6)
+    conn = get_db(); cur = conn.cursor()
+    rows = _db_fetchall(cur, "SELECT * FROM records WHERE username=? AND date BETWEEN ? AND ? ORDER BY date",
+                        (username, monday.isoformat(), sunday.isoformat()))
+    if USE_PG: cur.close()
     conn.close()
 
     records = []
