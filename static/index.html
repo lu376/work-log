@@ -682,7 +682,7 @@ function refreshWeekNav() {
   const weeks = settings.current_weeks || settings.company_weeks || [];
   let label;
   if (weeks.length) {
-    label = weeks.map(w => `${w.name}第${w.week_num}周`).join(' · ') + ` (日历第${currentReportWeek}周)`;
+    label = weeks.map(w => `${w.name}第${w.week_num}周`).join(' · ');
   } else {
     label = `第 ${currentReportWeek} 周`;
   }
