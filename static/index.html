@@ -269,7 +269,7 @@ body {
 </div>
 
 <div class="toast" id="toast"></div>
-<input type="file" accept="image/*" id="uploadInput" style="position:fixed;left:-9999px;top:0;" onchange="handleUpload(this)">
+<input type="file" accept="image/*" id="uploadInput" onchange="handleUpload(this)" style="width:0;height:0;overflow:hidden;position:absolute;">
 
 <script>
 const TODAY = new Date().toISOString().split('T')[0];
@@ -679,10 +679,12 @@ function initReport() {
 }
 
 function refreshWeekNav() {
-  let label = `第 ${currentReportWeek} 周`;
   const weeks = settings.current_weeks || settings.company_weeks || [];
+  let label;
   if (weeks.length) {
-    label += ' · ' + weeks.map(w => `${w.name}第${w.week_num}周`).join(' · ');
+    label = weeks.map(w => `${w.name}第${w.week_num}周`).join(' · ') + ` (日历第${currentReportWeek}周)`;
+  } else {
+    label = `第 ${currentReportWeek} 周`;
   }
   document.getElementById('weekNav').innerHTML = `
     <button onclick="navigateWeek(-1)">‹ 上周</button>
@@ -810,7 +812,9 @@ let uploadTargetField = 'references';
 
 function triggerUpload(field){
   uploadTargetField = field || 'references';
-  document.getElementById('uploadInput').click();
+  const inp = document.getElementById('uploadInput');
+  inp.value = '';  // 清空，确保 change 事件触发
+  inp.click();
 }
 
 async function handleUpload(input){
