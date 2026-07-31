@@ -438,7 +438,7 @@ function renderEditForm(){return`
 function addTaskInModal(){currentData.tasks.push({text:'',done:false});renderAll('history');setTimeout(()=>{const el=document.querySelectorAll('#hist-taskList .task-text');if(el.length)el[el.length-1].focus();},100);}
 function addItemInModal(field){currentData[field].push('');renderAll('history');const lid={learnings:'hist-learningList',outputs:'hist-outputList',experiences:'hist-experienceList'}[field];setTimeout(()=>{const el=document.querySelectorAll(`#${lid} .item-input`);if(el.length)el[el.length-1].focus();},100);}
 async function saveHistoryEdit(){await saveAll(editingDate);closeModal();loadHistory();}
-function closeModal(event){if(event&&event.target!==document.getElementById('modalOverlay'))return;document.getElementById('modalOverlay').classList.remove('show');editingDate=null;}
+function closeModal(event){if(event&&event.target!==document.getElementById('modalOverlay'))return;document.getElementById('modalOverlay').classList.remove('show');editingDate=null;loadToday();}
 
 // ============================================================
 // Report
