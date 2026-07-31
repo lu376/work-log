@@ -156,8 +156,10 @@ def _get_current_user(headers) -> str | None:
 def get_db():
     """获取数据库连接（自动检测 SQLite 或 PostgreSQL）。"""
     if USE_PG:
-        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        # Railway 的 DATABASE_URL 已是完整连接串，直接使用
+        conn = psycopg2.connect(DATABASE_URL)
         conn.autocommit = True
+        print(f"[DB] PostgreSQL connected, creating tables...")
         cur = conn.cursor()
         cur.execute("""CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at TEXT DEFAULT '')""")
@@ -648,9 +650,27 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/auth/status":
             token = _get_auth_token(self.headers)
             user = _validate_session(token)
+            # 检查表是否存在
+            db_ok = False; db_type = "postgresql" if USE_PG else "sqlite"
+            try:
+                conn = get_db()
+                cur = conn.cursor()
+                if USE_PG:
+                    cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name='users')")
+                    db_ok = cur.fetchone()[0]
+                    cur.close()
+                else:
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+                    db_ok = bool(cur.fetchone())
+                conn.close()
+            except Exception as e:
+                db_ok = False
+                db_type += f" error:{str(e)[:50]}"
             self._send_json({
                 "authenticated": bool(user),
                 "username": user or "",
+                "db_type": db_type,
+                "db_ok": db_ok,
             })
             return
 
