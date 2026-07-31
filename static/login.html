@@ -44,6 +44,8 @@ async function checkAuth() {
     const data = await res.json();
     if (data.authenticated) window.location.href = '/';
   } catch(e) {}
+  const u = localStorage.getItem('lastUser');
+  if (u) document.getElementById('username').value = u;
 }
 
 function toggleMode() {
@@ -70,7 +72,7 @@ async function handleLogin(e) {
     const url = isRegister ? '/api/auth/register' : '/api/auth/login';
     const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({username, password: pw}) });
     const data = await res.json();
-    if (data.ok) { window.location.href = '/'; }
+    if (data.ok) { localStorage.setItem('lastUser', username); window.location.href = '/'; }
     else { document.getElementById('error').textContent = data.error || '操作失败'; }
   } catch(e) { document.getElementById('error').textContent = '网络错误'; }
   btn.textContent = isRegister ? '注册' : '登录';
