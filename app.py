@@ -91,7 +91,7 @@ def _check_user(username: str, password: str) -> bool:
 
 def _create_session(username: str) -> str:
     token = secrets.token_hex(32)
-    expires = (datetime.now() + timedelta(hours=72)).isoformat()
+    expires = (datetime.now() + timedelta(days=30)).isoformat()
     # 内存缓存
     SESSION_STORE[token] = {"username": username, "expires": expires}
     # 写入数据库，服务重启后能恢复
@@ -607,8 +607,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             return None
         return user
 
-    def _set_auth_cookie(self, token: str, max_age: int = 259200):
-        """设置认证 cookie（默认 3 天）。"""
+    def _set_auth_cookie(self, token: str, max_age: int = 2592000):
+        """设置认证 cookie（默认 30 天）。"""
         self.send_header("Set-Cookie",
             f"auth_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}")
 
